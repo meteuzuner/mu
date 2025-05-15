@@ -1,11 +1,4 @@
 from typing import Optional, Tuple
-import numpy as np
-import astropy.units as u
-from astropy.units import Quantity, UnitConversionError
-from astropy.io import fits
-from astropy.wcs import WCS
-from astropy.coordinates import SkyCoord
-
 
 def read_fits(data_path: str,
               data_ext: int = 0, 
@@ -58,6 +51,8 @@ def read_fits(data_path: str,
     error : np.ndarray or None
         Error values from the error FITS file if provided; otherwise None.
     """
+    import numpy as np
+    import astropy.io.fits as fits
     from pathlib import Path
     
     # ------------------ 1. Check data file and read data ------------------
@@ -191,6 +186,7 @@ def convolve_fits(data: "np.ndarray",
         The convolved error array if an `error` was provided; otherwise `None`.
     """
 
+    import numpy as np
     from astropy.convolution import convolve_fft
     
     # --- Check data ---
@@ -303,7 +299,9 @@ def reproject_fits(data: "np.ndarray",
         The reprojected error array if an `error` was provided; otherwise `None`.
     """
 
+    import numpy as np
     from reproject import reproject_adaptive
+    from astropy.io import fits
     
     # --- Check data ---
     if not isinstance(data, np.ndarray):
@@ -398,6 +396,7 @@ def save_fits(
     """
     
     from pathlib import Path
+    from astropy.io import fits
 
     out_path = Path(output_path)  # Convert to Path object
 
@@ -436,402 +435,34 @@ def save_fits(
 
 
 #########################################################################################################
-# v250428 - Now it can work with units, too! 
-def subtract_background( 
-    data: "np.ndarray | Quantity",
-    background_value: "float | Quantity"
-) -> "np.ndarray | Quantity":
+def subtract_background(
+    data: "np.ndarray",
+    background_value: float
+) -> "np.ndarray":
     """
-    Subtract a constant background level from a 2D flux map, with full astropy.units support.
+    Subtract a constant background level from a 2D flux map.
 
     Parameters
     ----------
-    data : np.ndarray or astropy.units.Quantity
-        A 2D flux map. If a Quantity, it must have a unit.
-    background_value : float or astropy.units.Quantity
-        The constant background level. If a Quantity, it must have a unit.
+    data : np.ndarray
+        A 2D flux map (e.g., in units of intensity, brightness, etc.).
+    background_value : float
+        The constant background level to be subtracted from every pixel.
 
     Returns
     -------
-    np.ndarray or astropy.units.Quantity
-        A new 2D array (or Quantity) with `background_value` subtracted from each pixel.
-
-    Raises
-    ------
-    TypeError
-        If exactly one of `data` or `background_value` has a unit.
-    ValueError
-        If `data` is not 2D, or if both have units but are not compatible.
+    result : np.ndarray
+        A new 2D array with `background_value` subtracted from each pixel.
     """
-    # Detect which inputs are Quantities
-    data_is_qty = isinstance(data, Quantity)
-    bg_is_qty   = isinstance(background_value, Quantity)
+    import numpy as np
 
-    # Case 1: neither has a unit → plain subtraction
-    if not data_is_qty and not bg_is_qty:
-        if not isinstance(data, np.ndarray):
-            raise TypeError(f"'data' must be a NumPy array, got {type(data)}.")
-        if data.ndim != 2:
-            raise ValueError(f"'data' must be 2D, got {data.ndim}D.")
-        return data - background_value
-
-    # Case 2: one has a unit, the other doesn’t → error
-    if data_is_qty and not bg_is_qty:
-        raise TypeError(
-            f"data has unit {data.unit!r}, but background_value is dimensionless. "
-            "Both must be dimensionless or share the same unit."
-        )
-    if not data_is_qty and bg_is_qty:
-        raise TypeError(
-            f"background_value has unit {background_value.unit!r}, but data is dimensionless. "
-            "Both must be dimensionless or share the same unit."
-        )
-
-    # Case 3: both have units → convert & subtract
-    # check data dimensionality
-    if data.value.ndim != 2:
-        raise ValueError(f"'data' must be 2D, got {data.value.ndim}D.")
-    # try converting background to data's unit
-    try:
-        bg_converted = background_value.to(data.unit)
-    except UnitConversionError:
-        raise ValueError(
-            f"Cannot convert background unit {background_value.unit!r} "
-            f"to data unit {data.unit!r}."
-        )
-
-    return data - bg_converted
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################
-def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=None, 
-                            distance_mpc=None, gc_ra_deg=None, gc_dec_deg=None):
-    """
-    Plots the radial profiles from SED maps of a galaxy.
-    
-    Parameters
-    ----------
-      mass_map : np.ndarray
-          Dust mass map (e.g., in M$_\odot$/pc$^2$).
-      temperature_map : np.ndarray
-          Dust temperature map (in Kelvin).
-      beta_map (2D array, optional): np.ndarray, optional
-          Dust beta map. If not provided, only mass and temperature will be plotted.
-      header : 
-          Header containing WCS information.
-      distance : float
-          Distance to the galaxy in Mpc.
-      gc_ra_deg : float
-          RA of the galaxy center in degrees.
-      gc_dec_deg : float
-          Dec of the galaxy center in degrees.
-      
-    Returns
-    -------
-    """
-    import matplotlib.pyplot as plt
-    from astropy.coordinates import SkyCoord
-
-    # Check required inputs
-    if distance_mpc is None:
-        raise Exception("Need distance in Mpc to the galaxy!")
-    if header is None:
-        raise Exception("Need header!")
-    if gc_ra_deg is None or gc_dec_deg is None:
-        raise Exception("Need center coordinates of the galaxy in deg!")
-        
-    # Create a WCS object from the header
-    wcs = WCS(header)
-
-    # Create a grid of pixel coordinates
-    ny, nx = mass_map.shape  # image dimensions
-    y_indices, x_indices = np.indices((ny, nx))
-
-    # Convert pixel coordinates to (RA, DEC)
-    ra_map, dec_map = wcs.all_pix2world(x_indices, y_indices, 0)
-
-    # Compute the angular separation from the galaxy center for each pixel
-    galaxy_center  = SkyCoord(ra=gc_ra_deg*u.deg, dec=gc_dec_deg*u.deg, frame='icrs')
-    pixel_coords   = SkyCoord(ra=ra_map*u.deg,    dec=dec_map*u.deg,    frame='icrs')
-    separation     = galaxy_center.separation(pixel_coords)
-    separation_deg = separation.deg
-    separation_rad = np.deg2rad(separation_deg)
-    
-    # Convert angular separation to physical radius in kpc.
-    conversion_factor = distance_mpc * 1e3 # (kpc)
-    radius_kpc = separation_rad * conversion_factor
-
-    # Choose number of subplots based on beta_map availability
-    if beta_map is None:
-        fig, axs = plt.subplots(2, 1, sharex=True, figsize=(8, 12))
-    else:
-        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(8, 12))
-
-    # Plot 1: Radius vs Mass (log y-axis)
-    axs[0].scatter(radius_kpc.flatten(), mass_map.flatten(), s=1, alpha=0.5, c="navy")
-    axs[0].set_ylabel("$\sum_{dust}$ (M$_\odot$/pc$^2$)")
-    axs[0].set_yscale('log')
-
-    # Plot 2: Radius vs Temperature
-    axs[1].scatter(radius_kpc.flatten(), temperature_map.flatten(), s=1, alpha=0.5, c="navy")
-    axs[1].set_ylabel("T$_{dust}$ (K)")
-    
-    if beta_map is not None:
-        # Plot 3: Radius vs Beta
-        axs[2].scatter(radius_kpc.flatten(), beta_map.flatten(), s=1, alpha=0.5, c="navy")
-        axs[2].set_ylabel(r"$\beta$")
-        axs[2].set_xlabel("Radius (kpc)")
-    else:
-        axs[1].set_xlabel("Radius (kpc)")
-
-    plt.subplots_adjust(hspace=0)
-    plt.show()
-    return radius_kpc
-    
-    
-    
-    
-    
-    
-    
-    
-    
-#########################################################################################################
-def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
-                quick_plot=False):
-    """
-    Create a cutout (sub-image) around the specified center RA/Dec, using
-    a rectangular area given in degrees (width x height).
-
-    Parameters
-    ----------
-    data : 2D numpy array
-        The FITS data array to be cut out.
-    header : FITS header
-        The header corresponding to the FITS data; must contain valid WCS info.
-    center_ra : float
-        Right Ascension of the desired center (in degrees).
-    center_dec : float
-        Declination of the desired center (in degrees).
-    width_deg : float
-        Desired width of the sub-image (in degrees).
-    height_deg : float
-        Desired height of the sub-image (in degrees).
-    quick_plot : bool, optional
-        If True, displays the original image (with rectangle) and the cutout.
-
-    Returns
-    -------
-    cut_data : 2D numpy array
-        The 2D data array of the cutout.
-    cut_header : FITS header
-        A header for the cutout image, updated with the appropriate WCS.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
-    from astropy.coordinates import SkyCoord
-    from astropy.nddata import Cutout2D
-    
-    # Create a WCS object from the header
-    wcs_in = WCS(header)
-
-    # Define the central sky coordinate
-    sky_coord = SkyCoord(center_ra, center_dec, unit='deg')
-
-    # Define the size of the cutout region in (height, width)
-    cutout_size = (height_deg, width_deg) * u.deg
-
-    # Create the cutout
-    cutout = Cutout2D(data, sky_coord, cutout_size, wcs=wcs_in)
-
-    # Extract the cutout data array
-    cut_data = cutout.data
-
-    # Generate a new header with updated WCS
-    cut_header = cutout.wcs.to_header()
-
-    # following three lines are updated on v250510
-    cut_header["NAXIS"]  = 2
-    cut_header["NAXIS1"] = cut_data.shape[1]   # x‑size
-    cut_header["NAXIS2"] = cut_data.shape[0]   # y‑size
-
-    # Optional quick plot
-    if quick_plot:
-        # Get the pixel slices corresponding to the cutout
-        yslice, xslice = cutout.slices_original
-        
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-        # --- Left subplot: original data with rectangle ---
-        ax1 = axes[0]
-        ax1.imshow(data, origin='lower', cmap='gray', vmin=np.nanpercentile(data, 5), vmax=np.nanpercentile(data, 95))
-        ax1.set_title("Input Data")
-
-        # Draw a rectangle to show the cutout region
-        rect = Rectangle(
-            (xslice.start, yslice.start),
-            xslice.stop - xslice.start,
-            yslice.stop - yslice.start,
-            edgecolor='red',
-            facecolor='none',
-            linewidth=1.5
-        )
-        ax1.add_patch(rect)
-
-        # --- Right subplot: cutout data ---
-        ax2 = axes[1]
-        ax2.imshow(cut_data, origin='lower', cmap='gray', vmin=np.nanpercentile(data, 5), vmax=np.nanpercentile(data, 95))
-        ax2.set_title("Cutout Region")
-
-        plt.tight_layout()
-        plt.show()
-
-    return cut_data, cut_header
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-#########################################################################################################
-def elliptical_annulus_photometry(
-    data: np.ndarray,
-    header: fits.Header,
-    center_ra: u.Quantity,
-    center_dec: u.Quantity,
-    inner_semi_major: u.Quantity,
-    inner_semi_minor: u.Quantity,
-    outer_semi_major: u.Quantity,
-    outer_semi_minor: u.Quantity,
-    position_angle: u.Quantity,
-    # ---- background annulus ----
-    bkg_inner_semi_major: u.Quantity,
-    bkg_inner_semi_minor: u.Quantity,
-    bkg_outer_semi_major: u.Quantity,
-    bkg_outer_semi_minor: u.Quantity,
-    # ----------------------------
-    method: str = "mean",
-    quick_plot: bool = False,
-) -> tuple[float, float, float]:
-    """
-    Returns
-    -------
-    mean_val : float           weighted mean flux in science annulus
-    mean_err : float           σ_bkg / √N_eff
-    bkg_std  : float           standard deviation in background annulus
-    """
-    from photutils.aperture import SkyEllipticalAperture
-    
-    # ----------------- basic checks -------------------------------------
+    # 1. Basic checks
     if not isinstance(data, np.ndarray):
-        raise TypeError("'data' must be a NumPy array")
+        raise TypeError(f"'data' must be a NumPy array. Got {type(data)}.")
     if data.ndim != 2:
-        raise ValueError("'data' must be 2-D")
-    if not isinstance(header, fits.Header):
-        raise TypeError("'header' must be a fits.Header")
-    if method.lower() != "mean":
-        raise NotImplementedError("Only 'mean' is implemented")
+        raise ValueError(f"'data' must be 2D. Got {data.ndim}D.")
 
-    # ------------- helper: force degrees --------------------------------
-    def _ensure_deg(q, name):
-        if isinstance(q, (int, float)):
-            return q * u.deg
-        if hasattr(q, "unit"):
-            return q.to(u.deg)
-        raise TypeError(f"{name} must be number or Quantity")
+    # 2. Subtract background
+    result = data - background_value
 
-    # coordinates
-    wcs   = WCS(header)
-    galaxy_centre = SkyCoord(_ensure_deg(center_ra, "center_ra"),
-                             _ensure_deg(center_dec, "center_dec"))
-
-    # science apertures
-    ap_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(outer_semi_major, "a_out"),
-                                   _ensure_deg(outer_semi_minor, "b_out"),
-                                   _ensure_deg(position_angle, "theta"))
-    ap_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(inner_semi_major, "a_in"),
-                                   _ensure_deg(inner_semi_minor, "b_in"),
-                                   _ensure_deg(position_angle, "theta"))
-
-    # background apertures
-    ap_bkg_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_outer_semi_major, "bkg_a_out"),
-                                       _ensure_deg(bkg_outer_semi_minor, "bkg_b_out"),
-                                       _ensure_deg(position_angle, "theta"))
-    ap_bkg_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_inner_semi_major, "bkg_a_in"),
-                                       _ensure_deg(bkg_inner_semi_minor, "bkg_b_in"),
-                                       _ensure_deg(position_angle, "theta"))
-
-    # ------------------- masks (exact) ----------------------------------
-    cov_annulus = (ap_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-                   - ap_in .to_pixel(wcs).to_mask("exact").to_image(data.shape)
-                  )
-    cov_bkg = (ap_bkg_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-               - ap_bkg_in .to_pixel(wcs).to_mask("exact").to_image(data.shape)
-              )
-
-    # ------------------- science flux -----------------------------------
-    sci_ok   = (cov_annulus > 0) & np.isfinite(data)
-    weights  = cov_annulus[sci_ok]
-    sci_vals = data[sci_ok]
-
-    n_eff    = weights.sum()
-    if n_eff == 0:
-        raise RuntimeError("Science annulus contains no valid pixels")
-
-    mean_val = (weights * sci_vals).sum() / n_eff
-
-    # ------------------- background stats -------------------------------    
-    bkg_ok    = (cov_bkg > 0) & np.isfinite(data)
-    bkg_w     = cov_bkg[bkg_ok]
-    bkg_vals  = data[bkg_ok]
-    if bkg_vals.size == 0:
-        raise RuntimeError("Background annulus contains no valid pixels")
-
-    bkg_mean  = (bkg_w * bkg_vals).sum() / bkg_w.sum()
-    bkg_std   = np.sqrt( ((bkg_w * (bkg_vals - bkg_mean)**2).sum()) / bkg_w.sum() )
-
-    mean_err  = bkg_std / np.sqrt(n_eff)
-
-    print(f"Mean flux = {mean_val:.6e} ± {mean_err:.6e}")
-    print(f"Background σ = {bkg_std:.6e}\n")
-
-    # ------------------- quick-plot -------------------------------------
-    if quick_plot:
-        import matplotlib.pyplot as plt
-        vmin, vmax = np.nanpercentile(data, [1, 99])
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.imshow(data, origin="lower", cmap="gray", vmin=vmin, vmax=vmax)
-
-        ap_out.to_pixel(wcs).plot(ax=ax, color="red")
-        ap_in.to_pixel(wcs).plot(ax=ax, color="red")
-        ap_bkg_out.to_pixel(wcs).plot(ax=ax, color="cyan", ls=":")
-        ap_bkg_in.to_pixel(wcs).plot(ax=ax, color="cyan", ls=":")
-        plt.show()
-
-    return mean_val, mean_err, bkg_std
-
-    
-    
-    
-    
-    
-    
-    
-    
-
+    return result
