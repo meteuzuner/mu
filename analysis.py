@@ -735,6 +735,7 @@ def elliptical_annulus_photometry(
     mean_val : float           weighted mean flux in science annulus
     mean_err : float           σ_bkg / √N_eff
     bkg_std  : float           standard deviation in background annulus
+    bkg_mean : float           weighted mean flux in background annulus
     """
     from photutils.aperture import SkyEllipticalAperture
     
@@ -809,7 +810,8 @@ def elliptical_annulus_photometry(
     mean_err  = bkg_std / np.sqrt(n_eff)
 
     print(f"Mean flux = {mean_val:.6e} ± {mean_err:.6e}")
-    print(f"Background σ = {bkg_std:.6e}\n")
+    print(f"Background σ = {bkg_std:.6e}")
+    print(f"Background mean = {bkg_mean:.6e}\n")
 
     # ------------------- quick-plot -------------------------------------
     if quick_plot:
@@ -824,7 +826,7 @@ def elliptical_annulus_photometry(
         ap_bkg_in.to_pixel(wcs).plot(ax=ax, color="cyan", ls=":")
         plt.show()
 
-    return mean_val, mean_err, bkg_std
+    return mean_val, mean_err, bkg_std, bkg_mean
 
     
     
