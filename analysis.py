@@ -5,7 +5,7 @@ from astropy.units import Quantity, UnitConversionError
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
-
+from pathlib import Path
 
 def read_fits(data_path: str,
               data_ext: int = 0, 
