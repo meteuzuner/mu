@@ -517,7 +517,9 @@ def subtract_background(
 
 #########################################################################################################
 def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=None, 
-                            distance_mpc=None, gc_ra_deg=None, gc_dec_deg=None):
+                            distance_mpc=None, gc_ra_deg=None, gc_dec_deg=None, xlim=None,
+                            plot_style: Optional[str] = None,   
+                            save_fig: bool = False, output_path: Optional[str] = None, overwrite: bool = False):
     """
     Plots the radial profiles from SED maps of a galaxy.
     
@@ -537,7 +539,17 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
           RA of the galaxy center in degrees.
       gc_dec_deg : float
           Dec of the galaxy center in degrees.
-      
+      xlim : List of two floats
+          [xlim1, xlim2]
+      plot_style : str, optional
+          Path to a matplotlib style file (e.g., 'my-style.mplstyle'). If provided,
+          `plt.style.use(plot_style)` will be applied.
+      save : bool, optional
+          If True, saves the final figure to `output_path`. Default is False.
+      output_path : str, optional
+          The file path where the figure will be saved. Default path is '~Desktop/fig.png'.
+      overwrite : bool, optional
+          If True, overwrite any existing file at `output_path`. Default is False.
     Returns
     -------
     """
@@ -572,6 +584,14 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
     # Convert angular separation to physical radius in kpc.
     conversion_factor = distance_mpc * 1e3 # (kpc)
     radius_kpc = separation_rad * conversion_factor
+    
+    # Apply a custom style file if provided
+    if plot_style is not None:
+        style_path = Path(plot_style)
+        if style_path.exists():
+            plt.style.use(style_path)
+        else:
+            raise FileNotFoundError(f"Style file '{style_path}' does not exist.")
 
     # Choose number of subplots based on beta_map availability
     if beta_map is None:
@@ -595,9 +615,17 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
         axs[2].set_xlabel("Radius (kpc)")
     else:
         axs[1].set_xlabel("Radius (kpc)")
+        
+    if xlim is not None:
+        for ax_i in axs:
+            ax_i.set_xlim(xlim[0], xlim[1])
 
     plt.subplots_adjust(hspace=0)
     plt.show()
+    
+    if save_fig:
+        from mu.plotting import save_fig
+        save_fig(fig=fig, output_path=output_path, overwrite=overwrite)
     return radius_kpc
     
     

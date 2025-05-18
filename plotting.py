@@ -12,7 +12,7 @@ def plot_wcs(
     colormaps: Optional[
         "ColormapSpec"
     ] = "viridis",
-    percentile_range: tuple[float, float] = (5, 95),
+    percentile_range: tuple[float, float] = (1, 99),
 ) -> None:
     """
     Plot one or multiple 2D data arrays in their WCS coordinates, 
@@ -66,6 +66,7 @@ def plot_wcs(
     from typing import Optional, Union, List
     from matplotlib.colors import ListedColormap, BoundaryNorm
     from matplotlib.figure import Figure
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
     # --- 1. Validate inputs ---
     if not (len(data_list) == len(header_list) == len(labels)):
@@ -162,7 +163,17 @@ def plot_wcs(
             im = ax.imshow(data, origin="lower", cmap="viridis", vmin=vmin, vmax=vmax)
 
         # Add colorbar
-        cbar = plt.colorbar(im, ax=ax, orientation="vertical", fraction=0.048, pad=0.07)
+        #cbar = plt.colorbar(im, ax=ax, orientation="horizontal", fraction=0.033, pad=0.09)
+        # Add colorbar
+        cax = inset_axes(
+            ax,
+            width="100%",
+            height="5%",
+            loc="lower left",
+            bbox_to_anchor=(0, -0.1, 1, 1),
+            bbox_transform=ax.transAxes,
+            borderpad=0)
+        fig.colorbar(im, cax=cax, orientation="horizontal")
 
     fig.tight_layout()
 
