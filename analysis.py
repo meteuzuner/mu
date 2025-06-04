@@ -756,6 +756,7 @@ def elliptical_annulus_photometry(
     # ----------------------------
     method: str = "mean",
     quick_plot: bool = False,
+    save_fname: str | None = None,
 ) -> tuple[float, float, float]:
     """
     Returns
@@ -767,7 +768,7 @@ def elliptical_annulus_photometry(
     """
     from photutils.aperture import SkyEllipticalAperture
     
-    # ----------------- basic checks -------------------------------------
+    # --- 1. Basic Checks 
     if not isinstance(data, np.ndarray):
         raise TypeError("'data' must be a NumPy array")
     if data.ndim != 2:
@@ -777,7 +778,7 @@ def elliptical_annulus_photometry(
     if method.lower() != "mean":
         raise NotImplementedError("Only 'mean' is implemented")
 
-    # ------------- helper: force degrees --------------------------------
+    # --- 2. Helper: Force Degrees
     def _ensure_deg(q, name):
         if isinstance(q, (int, float)):
             return q * u.deg
@@ -785,38 +786,45 @@ def elliptical_annulus_photometry(
             return q.to(u.deg)
         raise TypeError(f"{name} must be number or Quantity")
 
-    # coordinates
+    # --- 3. Coordinates
     wcs   = WCS(header)
     galaxy_centre = SkyCoord(_ensure_deg(center_ra, "center_ra"),
                              _ensure_deg(center_dec, "center_dec"))
 
-    # science apertures
+    # --- 4. Science Apertures
     ap_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(outer_semi_major, "a_out"),
                                    _ensure_deg(outer_semi_minor, "b_out"),
                                    _ensure_deg(position_angle, "theta"))
     ap_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(inner_semi_major, "a_in"),
                                    _ensure_deg(inner_semi_minor, "b_in"),
                                    _ensure_deg(position_angle, "theta"))
+    
+    # ----- 4a. Fractional coverage images for the outer and inner ellipses
+    cov_out = ap_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
+    cov_in  = ap_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
 
-    # background apertures
+    # ----- 4b. Pixel centre must be inside outer and not inside inner ellipse
+    mask_annulus = (cov_out > 0) & ~(cov_in > 0)
+
+    # --- 5. Background Apertures
     ap_bkg_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_outer_semi_major, "bkg_a_out"),
                                        _ensure_deg(bkg_outer_semi_minor, "bkg_b_out"),
                                        _ensure_deg(position_angle, "theta"))
     ap_bkg_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_inner_semi_major, "bkg_a_in"),
                                        _ensure_deg(bkg_inner_semi_minor, "bkg_b_in"),
                                        _ensure_deg(position_angle, "theta"))
+    
+    # ----- 5a. Fractional coverage images for the outer and inner ellipses
+    cov_bkg_out = ap_bkg_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
+    cov_bkg_in  = ap_bkg_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
 
-    # ------------------- masks (exact) ----------------------------------
-    cov_annulus = (ap_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-                   - ap_in .to_pixel(wcs).to_mask("exact").to_image(data.shape)
-                  )
-    cov_bkg = (ap_bkg_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-               - ap_bkg_in .to_pixel(wcs).to_mask("exact").to_image(data.shape)
-              )
+    # ----- 5b. Pixel centre must be inside outer and not inside inner ellipse
+    mask_bkg = (cov_bkg_out > 0) & ~(cov_bkg_in > 0)
 
-    # ------------------- science flux -----------------------------------
-    sci_ok   = (cov_annulus > 0) & np.isfinite(data)
-    weights  = cov_annulus[sci_ok]
+
+    # --- 6. Science Flux (weighted mean on the ring)
+    sci_ok   = mask_annulus & np.isfinite(data)
+    weights  = cov_out[sci_ok]
     sci_vals = data[sci_ok]
 
     n_eff    = weights.sum()
@@ -825,9 +833,9 @@ def elliptical_annulus_photometry(
 
     mean_val = (weights * sci_vals).sum() / n_eff
 
-    # ------------------- background stats -------------------------------    
-    bkg_ok    = (cov_bkg > 0) & np.isfinite(data)
-    bkg_w     = cov_bkg[bkg_ok]
+    # --- 7. Background Stats
+    bkg_ok    = (cov_bkg_out > 0) & np.isfinite(data)
+    bkg_w     = cov_bkg_out[bkg_ok]
     bkg_vals  = data[bkg_ok]
     if bkg_vals.size == 0:
         raise RuntimeError("Background annulus contains no valid pixels")
@@ -841,7 +849,7 @@ def elliptical_annulus_photometry(
     print(f"Background σ = {bkg_std:.6e}")
     print(f"Background mean = {bkg_mean:.6e}\n")
 
-    # ------------------- quick-plot -------------------------------------
+    # --- 8. Quick Plot
     if quick_plot:
         import matplotlib.pyplot as plt
         vmin, vmax = np.nanpercentile(data, [1, 99])
@@ -853,6 +861,15 @@ def elliptical_annulus_photometry(
         ap_bkg_out.to_pixel(wcs).plot(ax=ax, color="cyan", ls=":")
         ap_bkg_in.to_pixel(wcs).plot(ax=ax, color="cyan", ls=":")
         plt.show()
+
+    # --- 9. Save the fits if requested
+    if save_fname is not None:
+        masked_data = np.full_like(data, np.nan, dtype=data.dtype)
+        masked_data[mask_annulus] = data[mask_annulus]      # keep science pixels only
+
+        fits.writeto(save_fname, masked_data, header, overwrite=True)
+        print(f"wrote annulus mask ->  {save_fname}")
+        
 
     return mean_val, mean_err, bkg_std, bkg_mean
 
