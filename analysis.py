@@ -757,7 +757,7 @@ def elliptical_annulus_photometry(
     method: str = "mean",
     quick_plot: bool = False,
     save_fname: str | None = None,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Returns
     -------
