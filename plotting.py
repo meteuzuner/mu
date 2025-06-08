@@ -1,17 +1,23 @@
-from typing import Optional, Tuple
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from astropy.io import fits
+from astropy.wcs import WCS
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 #########################################################################################################      
 def plot_wcs(
-    data_list: list["np.ndarray"],
-    header_list: list["fits.Header"],
+    data_list: list[np.ndarray],
+    header_list: list[fits.Header],
     labels: list[str],
-    plot_style: Optional[str] = None,
+    plot_style: str | None = None,
     save: bool = False,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     overwrite: bool = False,
-    colormaps: Optional[
-        "ColormapSpec"
-    ] = "viridis",
+    colormaps: ColormapSpec | None = "viridis",
     percentile_range: tuple[float, float] = (1, 99),
 ) -> None:
     """
@@ -58,24 +64,13 @@ def plot_wcs(
     -------
     None
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from astropy.io import fits
-    from astropy.wcs import WCS
-    from pathlib import Path
-    from typing import Optional, Union, List
-    from matplotlib.colors import ListedColormap, BoundaryNorm
-    from matplotlib.figure import Figure
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-
-    # --- 1. Validate inputs ---
+    # --- 1. Validate inputs
     if not (len(data_list) == len(header_list) == len(labels)):
         raise ValueError("data_list, header_list, and labels must all have the same length.")
 
-    # A helper function to parse either a single colormap spec or a list
-    # and return the correct item for subplot i.
+    # Parse either a single colormap spec or a list
     def _get_colormap_spec(
-        cmaps: Union[str, dict, List[str], List[dict], None],
+        cmaps: str | dict | list[str] | list[dict] | None,
         index: int,
         total: int
     ):
@@ -106,19 +101,19 @@ def plot_wcs(
             "Must be str, dict, list, or None."
         )
 
-    # 2. Apply a custom style file if provided
+    # --- 2. Apply a custom style file if provided
     if plot_style is not None:
         style_path = Path(plot_style)
         if style_path.exists():
             plt.style.use(style_path)
         else:
-            raise FileNotFoundError(f"Style file '{style_path}' does not exist.")
+            print(f"Warning: Style file '{style_path}' does not exist. Continuing with default style.")
 
-    # 3. Create figure and subplots
+    # --- 3. Create figure and subplots
     n_plots = len(data_list)
     fig = plt.figure(figsize=(6 * n_plots, 6))
 
-    # 4. Iterate over each data/header pair
+    # --- 4. Iterate over each data/header pair
     for i, (data, header, lab) in enumerate(zip(data_list, header_list, labels)):
         if not isinstance(data, np.ndarray):
             raise TypeError(f"Element {i} in data_list is not a NumPy array. Got {type(data)}.")
@@ -163,8 +158,6 @@ def plot_wcs(
             im = ax.imshow(data, origin="lower", cmap="viridis", vmin=vmin, vmax=vmax)
 
         # Add colorbar
-        #cbar = plt.colorbar(im, ax=ax, orientation="horizontal", fraction=0.033, pad=0.09)
-        # Add colorbar
         cax = inset_axes(
             ax,
             width="100%",
@@ -177,7 +170,7 @@ def plot_wcs(
 
     fig.tight_layout()
 
-    # 5. Optionally save the figure
+    # --- 5. Optionally save the figure
     if save:
         from mu.plotting import save_fig
         save_fig(fig=fig, output_path=output_path, overwrite=overwrite)
@@ -200,8 +193,8 @@ def plot_wcs(
 
 #########################################################################################################            
 def save_fig(
-    fig: Optional["Figure"] = None,
-    output_path: Optional["str"] = None,
+    fig: Figure | None = None,
+    output_path: str | None = None,
     overwrite: bool = False,
     dpi: int = 300
 ) -> None:
@@ -227,30 +220,26 @@ def save_fig(
     None
         The function saves the figure to the specified path and does not return anything.
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.figure import Figure
-    from typing import Optional
-    from pathlib import Path
-
+    # --- 1. Set default output path if not provided
     if output_path is None:
         desktop_path = Path.home() / "Desktop"
-        output_path = desktop_path / "fig.png"  # Keep as a Path object
+        output_path = desktop_path / "fig.png"
     
     out_path = Path(output_path)  # Ensure it's a Path object
 
-    # Use the current figure if none is provided.
+    # --- 2. If fig is None, use the current figure
     if fig is None:
         fig = plt.gcf()
 
-    # Check if the file exists and whether we can overwrite it.
+    # --- 3. Validate the output path
     if out_path.exists() and not overwrite:
         raise FileExistsError(
             f"File '{out_path}' already exists. "
             "Set 'overwrite=True' to overwrite it."
         )
 
+    # --- 4. Save the figure
     try:
-        # Cast out_path to str to avoid any compatibility issues with certain Matplotlib versions
         fig.savefig(str(out_path), dpi=dpi, bbox_inches='tight')
         print(f"File saved: {out_path}")
     except Exception as e:

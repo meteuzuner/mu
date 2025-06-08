@@ -1,23 +1,28 @@
-from typing import Optional, Tuple
 import numpy as np
 import astropy.units as u
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from astropy.units import Quantity, UnitConversionError
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from pathlib import Path
+from astropy.convolution import convolve_fft
+from reproject import reproject_adaptive
+from astropy.nddata import Cutout2D
+
 
 def read_fits(data_path: str,
               data_ext: int = 0, 
-              error_path: Optional[str] = None,
+              error_path: str | None = None,
               error_ext: int = 0, 
               SNR_cut: bool = False, 
-              SNR_threshold: Optional[float] = None,
-              min_value: Optional[float] = None,
-              max_value: Optional[float] = None,
-              min_err_value: Optional[float] = None,
-              max_err_value: Optional[float] = None
-             ) -> Tuple["np.ndarray", "fits.Header", Optional["np.ndarray"], Optional["fits.Header"]]:
+              SNR_threshold: float | None = None,
+              min_value: float | None = None,
+              max_value: float | None = None,
+              min_err_value: float | None = None,
+              max_err_value: float | None = None
+             ) -> tuple[np.ndarray, fits.Header, np.ndarray | None, fits.Header | None]:
     """
     Read the FITS data from a file and (optionally) an error file,
     applying an SNR cut if requested.
@@ -58,16 +63,15 @@ def read_fits(data_path: str,
     error : np.ndarray or None
         Error values from the error FITS file if provided; otherwise None.
     """
-    from pathlib import Path
-    
-    # ------------------ 1. Check data file and read data ------------------
+    # --- 1. Check data file and read data
     data_file = Path(data_path)
     if not data_file.exists():
         raise FileNotFoundError(f"Data file not found: {data_path}")
 
     data, header = fits.getdata(data_path, ext=data_ext, header=True)
     
-    # ------------------ 2. Check error file and read error ------------------
+
+    # --- 2. Check error file and read error
     error = None
     error_header = None
 
@@ -102,8 +106,9 @@ def read_fits(data_path: str,
             num_masked = np.count_nonzero(mask_snr)
             print(f"{num_masked} pixels (SNR < {SNR_threshold}) are changed to NaN.\n")
     
-    # ------------------ 3. Apply min_value / max_value masking ------------------
-    # --- 3a. Mask by min_value / max_value (data + error) ---
+
+    # --- 3. Apply min_value / max_value masking
+    # 3a. Mask by min_value / max_value (data + error)
     if min_value is not None:
         mask_min = data < min_value
         data = np.where(mask_min, np.nan, data)
@@ -122,8 +127,8 @@ def read_fits(data_path: str,
         if error is not None:
             error = np.where(mask_max, np.nan, error)
         
-    # --- 3b. Mask by min_err_value / max_err_value (error + data) ---
-    #     Only meaningful if we actually have an error file
+    # 3b. Mask by min_err_value / max_err_value (error + data)
+    # Only meaningful if we actually have an error file
     if (min_err_value is not None or max_err_value is not None) and error is None:
         raise ValueError("min_err_value/max_err_value given, but no error file was provided.")
 
@@ -142,9 +147,7 @@ def read_fits(data_path: str,
         print(f"{num_masked_err_max} pixels have error > {max_err_value} => masked.\n")
 
         
-
-    # ------------------ 4. Return the results ------------------ 
-
+    # --- 4. Return the results
     # Return either (data, header, error, error_header) or (data, header)
     if error is not None:
         return data, header, error, error_header
@@ -165,11 +168,10 @@ def read_fits(data_path: str,
 
 
 #########################################################################################################
-def convolve_fits(data: "np.ndarray",
-                  kernel_data: "np.ndarray",
-                  error: Optional["np.ndarray"] = None,
-                 ) -> Tuple["np.ndarray", Optional["np.ndarray"]]:
-    
+def convolve_fits(data: np.ndarray,
+                  kernel_data: np.ndarray,
+                  error: np.ndarray | None = None,
+                 ) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Convolve a FITS data and (optionally) an error file.
     
@@ -190,36 +192,31 @@ def convolve_fits(data: "np.ndarray",
     convolved_error : np.ndarray, optional
         The convolved error array if an `error` was provided; otherwise `None`.
     """
-
-    from astropy.convolution import convolve_fft
-    
-    # --- Check data ---
+    # --- 1. Check the data
     if not isinstance(data, np.ndarray):
         raise TypeError(f"'data' is not a NumPy array. Got {type(data)}.")
     if data.ndim != 2:
         raise ValueError(f"'data' must be 2D. Got {data.ndim}D.")
 
-    # --- Check kernel file ---
+    # 1b. Check kernel file
     if not isinstance(kernel_data, np.ndarray):
         raise TypeError(f"'kernel_data' is not a NumPy array. Got {type(kernel_data)}.")
     if kernel_data.ndim != 2:
         raise ValueError(f"'kernel_data' must be 2D. Got {kernel_data.ndim}D.")
     
-    # --- Check normalization of kernel data ---
+    # 1c. Check normalization of kernel data
     kernel_sum = np.nansum(kernel_data)
     if not np.isclose(kernel_sum, 1.0, atol=1e-3):
         raise ValueError(f"Kernel sum is {kernel_sum:.4g}, which is not close to 1. "
                          "Ensure the kernel is normalized.")  
     
-    
-    
-    # ------------------ Convolve data ------------------
+    # --- 2. Convolve data
     print("Convolving data with the provided kernel ...")
     convolved_data = convolve_fft(
         data,
         kernel_data,
         allow_huge=True,
-        normalize_kernel=False,  # kernel is already normalized
+        normalize_kernel=False,  # already normalized
         boundary="fill",
         fill_value=0.0,
         nan_treatment="fill",
@@ -227,18 +224,18 @@ def convolve_fits(data: "np.ndarray",
     )
 
     
-    
-    
-    # ------------------ Convolve Error (optional) ------------------
+    # --- 3. Convolve error (optional)
+
     convolved_error = None  # Default if no error map is provided.
-    # --- Check error map ---
+
+    # 3a. Check error map
     if error is not None:
         if not isinstance(error, np.ndarray):
             raise TypeError(f"'error' is not a NumPy array. Got {type(error)}.")
         if error.ndim != 2:
             raise ValueError(f"'error' must be 2D. Got {error.ndim}D.") 
     
-        # --- Convolve error map ---
+        # Convolve error map
         print("Convolving error with the squared kernel ...")
         # For error propagation in convolution, we convolve error^2 with kernel^2,
         # then take the square root of that result.
@@ -275,12 +272,11 @@ def convolve_fits(data: "np.ndarray",
 
 
 #########################################################################################################       
-def reproject_fits(data: "np.ndarray",
-                   data_header: "fits.Header",
-                   target_header: "fits.Header",
-                   error: Optional["np.ndarray"] = None,
-                  ) -> Tuple["np.ndarray", Optional["np.ndarray"]]:
-    
+def reproject_fits(data: np.ndarray,
+                   data_header: fits.Header,
+                   target_header: fits.Header,
+                   error: np.ndarray | None = None,
+                  ) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Reproject a FITS data and (optionally) an error file.
     
@@ -301,26 +297,21 @@ def reproject_fits(data: "np.ndarray",
         The reprojected data array (same shape as `data`).
     reprojected_error : np.ndarray, optional
         The reprojected error array if an `error` was provided; otherwise `None`.
-    """
-
-    from reproject import reproject_adaptive
-    
-    # --- Check data ---
+    """  
+    # --- 1. Check data
     if not isinstance(data, np.ndarray):
         raise TypeError(f"'data' is not a NumPy array. Got {type(data)}.")
     if data.ndim != 2:
         raise ValueError(f"'data' must be 2D. Got {data.ndim}D.")
 
-    # --- Check headers ---
+    # 1b. Check headers
     if not isinstance(data_header, fits.Header):
         raise TypeError(f"'data_header' is not a fits.Header object. Got {type(data_header)}.")
     if not isinstance(target_header, fits.Header):
         raise TypeError(f"'target_header' is not a fits.Header object. Got {type(target_header)}.")
     
     
-    
-    
-    # ------------------ Reproject data ------------------
+    # --- 2. Reproject data
     print("Reprojecting data to the provided target WCS...\n")
     reprojected_data, _ = reproject_adaptive(
         input_data=(data, data_header),
@@ -328,18 +319,19 @@ def reproject_fits(data: "np.ndarray",
         conserve_flux=True
     )
     
-    
-    
-    # ------------------ Reproject error (optional) ------------------
+
+    # --- 3. Reproject error (optional)
+
     reprojected_error = None  # Default if no error map is provided.
-    # --- Check error (if provided) ---
+    # If provided
     if error is not None:
+        # 3a. Check error file
         if not isinstance(error, np.ndarray):
             raise TypeError(f"'error' is not a NumPy array. Got {type(error)}.")
         if error.ndim != 2:
             raise ValueError(f"'error' must be 2D. Got {error.ndim}D.") 
     
-        # --- Reproject the error map ---
+        # 3b. Reproject the error map
         print("Reprojecting error to the target WCS...\n")
         # For error propagation, reproject error**2, then take sqrt
         reprojected_variance, _ = reproject_adaptive(
@@ -371,12 +363,11 @@ def reproject_fits(data: "np.ndarray",
     
 #########################################################################################################        
 def save_fits(
-    data: "np.ndarray",
-    data_header: "fits.Header",
+    data: np.ndarray,
+    data_header: fits.Header,
     output_path: str,
     overwrite: bool = False
-) -> None:
-    
+    ) -> None:
     """
     Save a 2D data array and its FITS header to a file.
 
@@ -396,9 +387,6 @@ def save_fits(
     None
         The function writes the FITS file to disk and does not return anything.
     """
-    
-    from pathlib import Path
-
     out_path = Path(output_path)  # Convert to Path object
 
     try:
@@ -438,9 +426,9 @@ def save_fits(
 #########################################################################################################
 # v250428 - Now it can work with units, too! 
 def subtract_background( 
-    data: "np.ndarray | Quantity",
-    background_value: "float | Quantity"
-) -> "np.ndarray | Quantity":
+    data: np.ndarray | Quantity,
+    background_value: float | Quantity
+) -> np.ndarray | Quantity:
     """
     Subtract a constant background level from a 2D flux map, with full astropy.units support.
 
@@ -518,8 +506,8 @@ def subtract_background(
 #########################################################################################################
 def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=None, 
                             distance_mpc=None, gc_ra_deg=None, gc_dec_deg=None, xlim=None,
-                            plot_style: Optional[str] = None,   
-                            save_fig: bool = False, output_path: Optional[str] = None, overwrite: bool = False):
+                            plot_style: str | None = None,   
+                            save_fig: bool = False, output_path: str | None = None, overwrite: bool = False):
     """
     Plots the radial profiles from SED maps of a galaxy.
     
@@ -553,9 +541,6 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
     Returns
     -------
     """
-    import matplotlib.pyplot as plt
-    from astropy.coordinates import SkyCoord
-
     # Check required inputs
     if distance_mpc is None:
         raise Exception("Need distance in Mpc to the galaxy!")
@@ -666,12 +651,7 @@ def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
         The 2D data array of the cutout.
     cut_header : FITS header
         A header for the cutout image, updated with the appropriate WCS.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
-    from astropy.coordinates import SkyCoord
-    from astropy.nddata import Cutout2D
-    
+    """    
     # Create a WCS object from the header
     wcs_in = WCS(header)
 
@@ -870,15 +850,4 @@ def elliptical_annulus_photometry(
         fits.writeto(save_fname, masked_data, header, overwrite=True)
         print(f"wrote annulus mask ->  {save_fname}")
         
-
     return mean_val, mean_err, bkg_std, bkg_mean
-
-    
-    
-    
-    
-    
-    
-    
-    
-

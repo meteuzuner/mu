@@ -1,4 +1,3 @@
-from typing import Optional, Tuple
 import astropy.units as u
 import numpy as np
 import astropy.constants as const

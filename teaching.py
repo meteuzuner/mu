@@ -1,4 +1,7 @@
-from typing import Optional, Tuple
+import numpy as np
+import matplotlib.pyplot as plt
+import astropy.units as u
+import astropy.constants as const
 
 def modified_blackbody():
     """
@@ -8,11 +11,6 @@ def modified_blackbody():
 
     No inputs, no returns -- just shows a figure with five subplots.
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import astropy.units as u
-    import astropy.constants as const
-
     #
     # --- Compute the modified blackbody ---
     #
