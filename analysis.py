@@ -755,8 +755,9 @@ def elliptical_annulus_photometry(
         raise ValueError("'data' must be 2-D")
     if not isinstance(header, fits.Header):
         raise TypeError("'header' must be a fits.Header")
-    if method.lower() != "mean":
-        raise NotImplementedError("Only 'mean' is implemented")
+    method = method.lower()
+    if method not in {"mean", "median"}:
+        raise NotImplementedError("method must be 'mean' or 'median'")
 
     # --- 2. Helper: Force Degrees
     def _ensure_deg(q, name):
@@ -811,23 +812,48 @@ def elliptical_annulus_photometry(
     if n_eff == 0:
         raise RuntimeError("Science annulus contains no valid pixels")
 
-    mean_val = (weights * sci_vals).sum() / n_eff
+    if method == "mean":
+        # Weighted mean
+        stat_val = (weights * sci_vals).sum() / n_eff
+    elif method == "median":
+        # Weighted median
+        def _weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
+            """
+            Weighted median of *values* with non-negative *weights*.
+
+            Returns the smallest x such that Σ w_i (v_i <= x) ≥ 0.5 Σ w_i.
+            """
+            srt = np.argsort(values)
+            v   = values[srt]
+            w   = weights[srt]
+
+            cdf = np.cumsum(w)
+            cut = 0.5 * w.sum()
+            return v[np.searchsorted(cdf, cut)]
+        
+        stat_val = _weighted_median(sci_vals, weights)
+
 
     # --- 7. Background Stats
-    bkg_ok    = (cov_bkg_out > 0) & np.isfinite(data)
+    bkg_ok    = mask_bkg & np.isfinite(data)
     bkg_w     = cov_bkg_out[bkg_ok]
     bkg_vals  = data[bkg_ok]
     if bkg_vals.size == 0:
         raise RuntimeError("Background annulus contains no valid pixels")
 
-    bkg_mean  = (bkg_w * bkg_vals).sum() / bkg_w.sum()
-    bkg_std   = np.sqrt( ((bkg_w * (bkg_vals - bkg_mean)**2).sum()) / bkg_w.sum() )
+    if method == "mean":
+        # Weighted mean
+        bkg_val  = (bkg_w * bkg_vals).sum() / bkg_w.sum()
+    elif method == "median":
+        # Weighted median
+        bkg_val = _weighted_median(bkg_vals, bkg_w)
 
-    mean_err  = bkg_std / np.sqrt(n_eff)
-
-    print(f"Mean flux = {mean_val:.6e} ± {mean_err:.6e}")
+    bkg_std  = np.sqrt( ((bkg_w * (bkg_vals - bkg_val) **2).sum()) / bkg_w.sum() )
+    stat_err = bkg_std / np.sqrt(n_eff)
+    print(f"{method.capitalize()} flux = {stat_val:.6e} ± {stat_err:.6e}")
+    print(f"Background {method} = {bkg_val:.6e}\n")
     print(f"Background σ = {bkg_std:.6e}")
-    print(f"Background mean = {bkg_mean:.6e}\n")
+
 
     # --- 8. Quick Plot
     if quick_plot:
@@ -850,4 +876,4 @@ def elliptical_annulus_photometry(
         fits.writeto(save_fname, masked_data, header, overwrite=True)
         print(f"wrote annulus mask ->  {save_fname}")
         
-    return mean_val, mean_err, bkg_std, bkg_mean
+    return stat_val, stat_err, bkg_std, bkg_val

@@ -8,6 +8,8 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
+ColormapSpec = str | dict | list[str] | list[dict] | None
+
 #########################################################################################################      
 def plot_wcs(
     data_list: list[np.ndarray],
