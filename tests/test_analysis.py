@@ -5,7 +5,10 @@ import pytest
 from mu.analysis import subtract_background
 
 # ----------------------------------------------------------------
-# Subtract background tests
+# Subtract Background Tests
+# ----------------------------------------------------------------
+
+# If no units are used, the function should work with plain numpy arrays
 def test_subtraction_plain_array():
     data = np.array([[1.0, 2.0], 
                      [3.0, 4.0]])
@@ -15,6 +18,7 @@ def test_subtraction_plain_array():
     assert np.array_equal(result, expected)
 
 
+# If the same units are used, the function should work with astropy quantities
 def test_subtraction_same_unit():
     data = np.array([[1.0, 2.0], 
                      [3.0, 4.0]]
@@ -29,6 +33,7 @@ def test_subtraction_same_unit():
     assert np.allclose(result.value, expected.value)
 
 
+# If different units are used, the function should convert them
 def test_subtraction_quantity_convertible_unit():
     data = np.array([[1.0, 2.0], [3.0, 4.0]]) * u.Jy
     bg = 500 * u.mJy  # 0.5 Jy
@@ -39,6 +44,7 @@ def test_subtraction_quantity_convertible_unit():
     assert np.allclose(result.value, expected.value)
 
 
+# If one has units and the other does not, the function should raise a TypeError
 @pytest.mark.parametrize(
     "data,bg",
     [
@@ -51,8 +57,12 @@ def test_error_when_units_mismatch(data, bg):
         subtract_background(data, bg)
 
 
+# If the units are incompatible, the function should raise a ValueError
 def test_error_when_units_incompatible():
     data = np.ones((2, 2)) * u.Jy
     bg = 1.0 * u.s
     with pytest.raises(ValueError):
         subtract_background(data, bg)
+##########################################################
+
+
