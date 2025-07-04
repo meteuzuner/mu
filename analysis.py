@@ -580,18 +580,18 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
 
     # Choose number of subplots based on beta_map availability
     if beta_map is None:
-        fig, axs = plt.subplots(2, 1, sharex=True, figsize=(8, 12))
+        fig, axs = plt.subplots(2, 1, sharex=True, figsize=(3.333*2, 3*2))
     else:
-        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(8, 12))
+        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(3.333*3, 3*3))
 
-    # Plot 1: Radius vs Mass (log y-axis)
+    # Plot 1: Radius vs Mass
     axs[0].scatter(radius_kpc.flatten(), mass_map.flatten(), s=1, alpha=0.5, c="navy")
-    axs[0].set_ylabel("$\sum_{dust}$ (M$_\odot$/pc$^2$)")
-    axs[0].set_yscale('log')
+    axs[0].set_ylabel("$\sum$ (M$_\odot$/pc$^2$)")
+    #axs[0].set_yscale('log')
 
     # Plot 2: Radius vs Temperature
     axs[1].scatter(radius_kpc.flatten(), temperature_map.flatten(), s=1, alpha=0.5, c="navy")
-    axs[1].set_ylabel("T$_{dust}$ (K)")
+    axs[1].set_ylabel("T$_{d}$ (K)")
     
     if beta_map is not None:
         # Plot 3: Radius vs Beta

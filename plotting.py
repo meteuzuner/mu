@@ -1,26 +1,35 @@
+from __future__ import annotations
 from pathlib import Path
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.colors import ListedColormap, BoundaryNorm
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from astropy.io import fits
 from astropy.wcs import WCS
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from typing import Sequence, Tuple, Union, Optional
+from mu.utils import assert_same_length
 
 ColormapSpec = str | dict | list[str] | list[dict] | None
 
-#########################################################################################################      
+######################################################################################################### 
 def plot_wcs(
-    data_list: list[np.ndarray],
+    data_list:   list[np.ndarray],
     header_list: list[fits.Header],
-    labels: list[str],
-    plot_style: str | None = None,
-    save: bool = False,
+    labels:      list[str],
+    *,
+    orientation: str = "horizontal",
+    plot_style:  str | None = None,
+    save:        bool = False,
     output_path: str | None = None,
-    overwrite: bool = False,
-    colormaps: ColormapSpec | None = "viridis",
+    overwrite:   bool = False,
+    colormaps:   ColormapSpec | None = "inferno",
     percentile_range: tuple[float, float] = (1, 99),
+    vmin_vmax: Optional[
+        Union[Tuple[float, float], Sequence[Tuple[float, float]]]
+    ] = None,
+    minimal:    bool  = False,
+    pad_inches: float = 0.1,
 ) -> None:
     """
     Plot one or multiple 2D data arrays in their WCS coordinates, 
@@ -36,13 +45,16 @@ def plot_wcs(
         A list of corresponding FITS headers, describing each data's WCS.
     labels : list of str
         A list of labels for each data array (e.g., wavelengths or "Mass", "Temp").
+    orientation : Literal["horizontal", "vertical"], optional
+        Orientation of the subplots. If "horizontal", all subplots are in one row.
+        If "vertical", all subplots are in one column. Default is "horizontal".
     plot_style : str, optional
         Path to a matplotlib style file (e.g., 'my-style.mplstyle'). If provided,
         `plt.style.use(plot_style)` will be applied.
     save : bool, optional
         If True, saves the final figure to `output_path`. Default is False.
     output_path : str, optional
-        The file path where the figure will be saved. Default path is '~Desktop/fig.png'.
+        The file path where the figure will be saved. If save is True, this must be provided.
     overwrite : bool, optional
         If True, overwrite any existing file at `output_path`. Default is False.
     colormaps : str or dict or list of str/dict, optional
@@ -57,125 +69,146 @@ def plot_wcs(
               "boundaries": [0.5, 1.0, 1.5, 999999],
               "colors": ["red", "green", "yellow"]
           }
-        Default is "viridis".
+        Default is "inferno".
     percentile_range : (float, float), optional
         The (low, high) percentile for stretching continuous colormaps,
-        used when a discrete custom colormap isn't given. Default is (5, 95).
-
+        used when a discrete custom colormap isn't given. Default is (1, 99).
+    vmin_vmax : tuple or list of tuples, optional
+        The (min, max) values for the color scale. If it is none, percentile_range will be used.
+    minimal : bool, optional
+        If True, the plot will have minimal styling: no axis labels, ticks, or grid
+    pad_inches : float, optional
+        Amount of padding in inches around the figure when bbox_inches is 'tight'. Default is 0.1.
     Returns
     -------
     None
     """
-    # --- 1. Validate inputs
-    if not (len(data_list) == len(header_list) == len(labels)):
-        raise ValueError("data_list, header_list, and labels must all have the same length.")
+    # --- 0. Inital setup and checks
+    assert_same_length(data_list, header_list, labels)
 
-    # Parse either a single colormap spec or a list
-    def _get_colormap_spec(
-        cmaps: str | dict | list[str] | list[dict] | None,
-        index: int,
-        total: int
-    ):
-        """
-        Returns (cmap_or_listedcmap, norm_or_None) for subplot i.
-        If a single item, apply to all. If a list, pick the i-th entry.
-        """
+    orientation = orientation.lower()
+    if orientation not in {"horizontal", "vertical"}:
+        raise ValueError('orientation must be "horizontal" or "vertical"')
+
+    # make vmin_vmax a list-of-pairs
+    if vmin_vmax is not None:
+        if isinstance(vmin_vmax, (tuple, list)) and len(vmin_vmax) == 2 \
+           and not isinstance(vmin_vmax[0], (tuple, list)):
+            vmin_vmax = [tuple(vmin_vmax)] * len(data_list)
+        assert_same_length(vmin_vmax, data_list)
+
+
+    # --- 1. (optional) Apply custom style if provided
+    if plot_style is not None:
+        p = Path(plot_style)
+        if not p.exists():
+            raise FileNotFoundError(p)
+        plt.style.use(p)
+
+    # --- 2. Figure size
+    n_plots        = len(data_list)
+    h_pix, w_pix   = data_list[0].shape
+    aspect         = w_pix / h_pix          # width/height
+    fig_w          = 10/3                   # MNRAS width in inches
+    nrows, ncols   = (1, n_plots) if orientation=="horizontal" else (n_plots, 1)
+    subplot_w      = fig_w / ncols
+    subplot_h      = subplot_w / aspect
+    fig_h          = subplot_h * nrows
+    fig            = plt.figure(figsize=(fig_w, fig_h))
+
+
+    # --- 3. Helper for colormap handling
+    def _get_cmap(cmaps: Union[str, dict, list[str], list[dict], None], i: int):
+        # If no colormap specified, fallback to "inferno"
         if cmaps is None:
-            # No colormap specified, fallback to "viridis"
-            return "viridis", None
+            return "inferno"
 
         # If it's a single string or dict, apply it to all subplots
         if isinstance(cmaps, (str, dict)):
-            return cmaps, None
+            return cmaps
         
         # If it's a list, pick the i-th element
-        if isinstance(cmaps, list):
-            if len(cmaps) != total:
-                raise ValueError(
-                    f"Length of colormaps list ({len(cmaps)}) does not match "
-                    f"the number of subplots ({total})."
-                )
-            return cmaps[index], None
-        
-        # Should never reach here if types are correct
-        raise ValueError(
-            f"Unsupported type for colormaps: {type(cmaps)}. "
-            "Must be str, dict, list, or None."
-        )
+        return cmaps[i]
 
-    # --- 2. Apply a custom style file if provided
-    if plot_style is not None:
-        style_path = Path(plot_style)
-        if style_path.exists():
-            plt.style.use(style_path)
-        else:
-            print(f"Warning: Style file '{style_path}' does not exist. Continuing with default style.")
-
-    # --- 3. Create figure and subplots
-    n_plots = len(data_list)
-    fig = plt.figure(figsize=(6 * n_plots, 6))
 
     # --- 4. Iterate over each data/header pair
-    for i, (data, header, lab) in enumerate(zip(data_list, header_list, labels)):
-        if not isinstance(data, np.ndarray):
-            raise TypeError(f"Element {i} in data_list is not a NumPy array. Got {type(data)}.")
-        if data.ndim != 2:
-            raise ValueError(f"Data at index {i} is not 2D. Got {data.ndim}D.")
-        if not isinstance(header, fits.Header):
-            raise TypeError(f"Element {i} in header_list is not a fits.Header. Got {type(header)}.")
+    for i, (data, hdr, lab) in enumerate(zip(data_list, header_list, labels)):
+        ax = fig.add_subplot(nrows, ncols, i + 1, projection=WCS(hdr))
 
-        ax = fig.add_subplot(1, n_plots, i + 1, projection=WCS(header))
-        ax.set_title(str(lab))
-        ax.set_xlabel("RA")
-        ax.set_ylabel("Dec")
-
-        # Get the colormap spec for this subplot
-        cmap_spec, _ = _get_colormap_spec(colormaps, i, n_plots)
-
-        # If the user gave a dictionary with boundaries/colors => discrete colormap
-        if isinstance(cmap_spec, dict):
-            boundaries = cmap_spec["boundaries"]
-            color_list = cmap_spec["colors"]
-            if len(boundaries) != len(color_list) + 1:
-                raise ValueError(
-                    "len(boundaries) must be exactly one greater than len(colors). "
-                    f"Got {len(boundaries)} boundaries vs. {len(color_list)} colors."
-                )
-            discrete_cmap = ListedColormap(color_list)
-            discrete_norm = BoundaryNorm(boundaries, discrete_cmap.N)
-            # Plot with discrete colormap
-            im = ax.imshow(data, origin="lower", cmap=discrete_cmap, norm=discrete_norm)
-        elif isinstance(cmap_spec, str):
-            # It's a standard colormap name
-            low_p, high_p = percentile_range
-            vmin = np.nanpercentile(data, low_p)
-            vmax = np.nanpercentile(data, high_p)
-            im = ax.imshow(data, origin="lower", cmap=cmap_spec, vmin=vmin, vmax=vmax)
+        # 5a. Axes: labels, ticks, visibility
+        if minimal:
+            ax.set_frame_on(False)
+            for c in ax.coords:
+                c.set_axislabel('')
+                c.set_ticklabel_visible(False)
+                c.set_ticks_visible(False)
         else:
-            # Fallback if somehow we get None or something else
-            # Use "viridis" by default
-            low_p, high_p = percentile_range
-            vmin = np.nanpercentile(data, low_p)
-            vmax = np.nanpercentile(data, high_p)
-            im = ax.imshow(data, origin="lower", cmap="viridis", vmin=vmin, vmax=vmax)
+            if orientation == "horizontal":
+                ax.set_xlabel("RA (J2000)")
+                ax.tick_params(axis="x", top=False, bottom=True)
+                if i == 0:
+                    ax.set_ylabel("Dec (J2000)")
+                    ax.tick_params(axis="y", left=True, right=False)
+                else:
+                    ax.coords['dec'].set_axislabel('')
+                    ax.coords['dec'].set_ticklabel_visible(False)
+                    ax.tick_params(axis="y", left=False, right=False)
+            elif orientation == "vertical":
+                #ax.set_ylabel("Dec (J2000)")
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", left=True, right=False)
+                if i == n_plots - 1:
+                    ax.set_xlabel("RA (J2000)")
+                    ax.tick_params(axis="x", top=False, bottom=True)
+                else:
+                    ax.coords['ra'].set_axislabel('')
+                    ax.coords['ra'].set_ticklabel_visible(False)
+                    ax.tick_params(axis="x", top=False, bottom=False)
 
-        # Add colorbar
-        cax = inset_axes(
-            ax,
-            width="100%",
-            height="5%",
-            loc="lower left",
-            bbox_to_anchor=(0, -0.1, 1, 1),
-            bbox_transform=ax.transAxes,
-            borderpad=0)
-        fig.colorbar(im, cax=cax, orientation="horizontal")
+        # 5b. Color limits
+        if vmin_vmax is None:
+            vmin = np.nanpercentile(data, percentile_range[0])
+            vmax = np.nanpercentile(data, percentile_range[1])
+        else:
+            vmin, vmax = vmin_vmax[i]
 
-    fig.tight_layout()
+        # 5c. Colorbar: If the user gave a dictionary with boundaries/colors => discrete colormap
+        cmap_spec = _get_cmap(colormaps, i)
+        if isinstance(cmap_spec, dict):
+            cmap = ListedColormap(cmap_spec["colors"])
+            norm = BoundaryNorm(cmap_spec["boundaries"], cmap.N)
+            im   = ax.imshow(data, origin="lower", cmap=cmap, norm=norm)
+        else:
+            im   = ax.imshow(data, origin="lower", cmap=cmap_spec,
+                             vmin=vmin, vmax=vmax)
 
-    # --- 5. Optionally save the figure
+        # Colorbar placement
+        if orientation == "horizontal":
+            cax = inset_axes(ax, width="100%", height="50%", loc="upper center",
+                             bbox_to_anchor=(0.0, 0.95, 1, 0.1),
+                             bbox_transform=ax.transAxes, borderpad=0)
+            cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
+            if not minimal:
+                cbar.set_label(str(lab), labelpad=8)
+            cbar.ax.xaxis.set_ticks_position('top')
+            cbar.ax.xaxis.set_label_position('top')
+            cbar.ax.tick_params(axis='x', pad=1)
+        elif orientation== "vertical":
+            cax = inset_axes(ax, width="7.5%", height="100%", loc="lower left",
+                             bbox_to_anchor=(1.00, 0, 1, 1),
+                             bbox_transform=ax.transAxes, borderpad=0)
+            cbar = fig.colorbar(im, cax=cax, orientation="vertical")
+            if not minimal:
+                cbar.set_label(str(lab))
+
+
+    # --- 6. Layout & Save 
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
+
     if save:
-        from mu.plotting import save_fig
-        save_fig(fig=fig, output_path=output_path, overwrite=overwrite)
+        if output_path is None:
+            output_path = Path.home() / "Desktop" / "fig.png"
+        save_fig(fig, output_path, overwrite=overwrite, pad_inches=pad_inches)
 
     plt.show()
     plt.close(fig)
@@ -188,17 +221,14 @@ def plot_wcs(
 
 
 
-
-
-
-    
-
 #########################################################################################################            
 def save_fig(
     fig: Figure | None = None,
     output_path: str | None = None,
+    *,
     overwrite: bool = False,
-    dpi: int = 300
+    dpi: int = 300,
+    pad_inches: float = 0.1,
 ) -> None:
     """
     Save a matplotlib figure to a file.
@@ -216,6 +246,8 @@ def save_fig(
         If False and the file exists, a FileExistsError is raised. Default is False.
     dpi : int, optional
         The resolution in dots per inch for the saved figure. Default is 300.
+    pad_inches : float, optional
+        Amount of padding in inches around the figure when bbox_inches is 'tight'. Default is 0.1.
 
     Returns
     -------
@@ -242,7 +274,7 @@ def save_fig(
 
     # --- 4. Save the figure
     try:
-        fig.savefig(str(out_path), dpi=dpi, bbox_inches='tight')
+        fig.savefig(str(out_path), dpi=dpi, bbox_inches='tight', pad_inches=pad_inches)
         print(f"File saved: {out_path}")
     except Exception as e:
         raise RuntimeError(
