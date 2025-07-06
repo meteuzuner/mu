@@ -347,20 +347,15 @@ def reproject_fits(data: np.ndarray,
         return reprojected_data, reprojected_error
     else:
         return reprojected_data
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
 
-    
+
+
+
+
+
+
+
+
 #########################################################################################################        
 def save_fits(
     data: np.ndarray,

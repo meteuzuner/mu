@@ -280,3 +280,199 @@ def save_fig(
         raise RuntimeError(
             f"An error occurred while saving the figure to '{out_path}': {e}"
         ) from e
+    
+
+
+
+
+
+
+
+
+######################################################################################################### 
+def plot_histogram(
+    data_list:   Sequence[np.ndarray],
+    *,
+    # ----------------------------------------------------------------
+    bin_widths:  float | Sequence[float] | None = None,
+    orientation: str = "horizontal",
+    colors:      str  | Sequence[str]   | None = None,
+    min_val:     float | Sequence[float] | None = None,
+    max_val:     float | Sequence[float] | None = None,
+    xlabels:     str   | Sequence[str]   | None = None,
+    ylabel:      str | None = "Number",
+    titles:      str   | Sequence[str]   | None = None,
+    share_y:     bool = False,
+    # ----------------------------------------------------------------
+    plot_style:  str | None = None,
+    save:        bool = False,
+    output_path: str | None = None,
+    overwrite:   bool = False,
+    ylog:        bool = False,
+    annotate:    bool = False,
+    pad_inches:  float = 0.1,
+    line_width:  float = 2,
+) -> None:
+    """
+    Quick multi-histogram helper.
+
+    Parameters
+    ----------
+    data_list
+        A sequence of 1D or 2D arrays.  Each entry becomes one subplot.
+    bin_widths, colors, min_val, max_val, xlabels, titles
+        A scalar or a list with length == len(data_list).
+    share_y
+        If True, all subplots share the same y-axis limits.
+    ylabel
+        Shared y-axis label (only drawn on the first subplot).  Default "Number".
+    plot_style : str, optional
+        Path to a matplotlib style file (e.g., 'my-style.mplstyle'). If provided,
+        `plt.style.use(plot_style)` will be applied.
+    save : bool, optional
+        If True, saves the final figure to `output_path`. Default is False.
+    output_path : str, optional
+        The file path where the figure will be saved. If save is True, this must be provided.
+        Default is '~/Desktop/fig.png'.
+    overwrite : bool, optional
+        If True, overwrite any existing file at `output_path`. Default is False.
+    ylog
+        If *True* the y-axis uses a log scale.
+    annotate
+        If *True* annotate each bar with its count.
+    pad_inches : float, optional
+        Amount of padding in inches around the figure when bbox_inches is 'tight'. Default is 0.1.
+    line_width : float, optional
+        Line width. Default is 2.0.
+    """
+    # --- 0. Helpers
+    def _broadcast(value, name: str, n: int):
+        """Return *value* as a list of length *n*."""
+        if value is None:
+            return [None] * n
+        if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+            return [value] * n
+        if len(value) == 1:
+            return list(value) * n
+        if len(value) != n:
+            raise ValueError(f"{name} must be length 1 or {n}, got {len(value)}.")
+        return list(value)
+
+    # --- 1. Style
+    if plot_style is not None:
+        p = Path(plot_style).expanduser()
+        if not p.exists():
+            raise FileNotFoundError(p)
+        plt.style.use(p)
+
+    # --- 2. Normalise parameters
+    n_plots   = len(data_list)
+    bin_widths = _broadcast(bin_widths, "bin_widths", n_plots)
+    colors     = _broadcast(colors,     "colors",     n_plots)
+    min_val    = _broadcast(min_val,    "min_val",    n_plots)
+    max_val    = _broadcast(max_val,    "max_val",    n_plots)
+    xlabels    = _broadcast(xlabels,    "xlabels",    n_plots)
+    titles     = _broadcast(titles,     "titles",     n_plots)
+
+    # default colour cycle
+    if all(c is None for c in colors):
+        default_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        colors = [default_cycle[i % len(default_cycle)] for i in range(n_plots)]
+
+    # --- 3. Figure layout
+    fig_width_in  = 10 / 3                       # ~3.33" (MNRAS column width)
+    nrows, ncols  = (1, n_plots) if orientation == "horizontal" else (n_plots, 1)
+    subplot_w     = fig_width_in / ncols
+    fig_height_in = subplot_w * nrows
+    fig, axes     = plt.subplots(
+        nrows, ncols,
+        figsize=(fig_width_in, fig_height_in),
+        sharey=share_y,
+        squeeze=False,
+    )
+    axes = axes.ravel()  # flatten for easy indexing
+
+    global_max = 0  # track tallest bar if share_y is True
+
+    # --- 4. Iterate over each data in data_list
+    for idx, (ax, data) in enumerate(zip(axes, data_list)):
+        flat = np.asarray(data, dtype=float).ravel()
+        flat = flat[np.isfinite(flat)]
+        if flat.size == 0:
+            raise ValueError(f"Dataset {idx} contains no finite values.")
+
+        # per-dataset limits
+        vmin = min_val[idx] if min_val[idx] is not None else np.floor(flat.min())
+        vmax = max_val[idx] if max_val[idx] is not None else np.ceil(flat.max())
+        if vmax <= vmin:
+            raise ValueError(f"max_val must exceed min_val for dataset {idx}.")
+
+        # per-dataset binning
+        if bin_widths[idx] is None:
+            edges = np.histogram_bin_edges(flat, bins=10, range=(vmin, vmax))
+        else:
+            bw    = float(bin_widths[idx])
+            edges = np.arange(vmin, vmax + bw, bw)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        counts, _ = np.histogram(flat, bins=edges)
+        bar_width = edges[1] - edges[0]
+
+        bars = ax.bar(
+            centers,
+            counts,
+            width=bar_width,
+            align="center",
+            color=colors[idx],
+            edgecolor="black",
+            linewidth=line_width,
+        )
+
+        global_max = max(global_max, counts.max())
+
+        # labels & formatting
+        if xlabels[idx] is not None:
+            ax.set_xlabel(xlabels[idx])
+        if idx == 0 and ylabel is not None:
+            ax.set_ylabel(ylabel)
+        if titles[idx] is not None:
+            ax.set_title(titles[idx])
+        if ylog:
+            ax.set_yscale("log")
+
+        ax.set_xticks(centers)
+        ax.set_xticks(edges, minor=True)
+        ax.tick_params(axis="x", which="minor", labelbottom=False, size=4)
+        ax.tick_params(axis="x", which="major", size=8)
+        if len(centers) > 5:
+            ax.tick_params(axis="x", labelrotation=45)
+
+        # annotation
+        if annotate:
+            for bar in bars:
+                h = bar.get_height()
+                if h > 0:
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        h,
+                        f"{int(h)}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=6,
+                        color="black",
+                    )
+
+    # share y-limits (manual fallback)
+    fig.tight_layout(pad=pad_inches)
+    if share_y and not ylog:
+        fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
+        for ax in axes:
+            ax.set_ylim(0, global_max * 1.05)
+
+    # save
+    if save:
+        out = Path(output_path or Path.home() / "Desktop/fig.png").expanduser()
+        if out.exists() and not overwrite:
+            raise FileExistsError(f"{out} exists (set overwrite=True to replace).")
+        fig.savefig(out, bbox_inches="tight", pad_inches=pad_inches, dpi=300)
+    plt.show()
+    plt.close(fig)
