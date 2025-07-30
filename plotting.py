@@ -109,8 +109,8 @@ def plot_wcs(
     n_plots        = len(data_list)
     h_pix, w_pix   = data_list[0].shape
     aspect         = w_pix / h_pix          # width/height
-    fig_w          = 10/3                   # MNRAS width in inches
     nrows, ncols   = (1, n_plots) if orientation=="horizontal" else (n_plots, 1)
+    fig_w          = 10/3 * ncols                   # MNRAS width in inches
     subplot_w      = fig_w / ncols
     subplot_h      = subplot_w / aspect
     fig_h          = subplot_h * nrows
@@ -345,6 +345,10 @@ def plot_histogram(
     line_width : float, optional
         Line width. Default is 2.0.
     """
+
+    # --- 0. Input validation
+    if isinstance(data_list, np.ndarray): # sometimes data_list is a single array instead of a list with a single element
+        data_list = [data_list]
     # --- 0. Helpers
     def _broadcast(value, name: str, n: int):
         """Return *value* as a list of length *n*."""
@@ -380,8 +384,8 @@ def plot_histogram(
         colors = [default_cycle[i % len(default_cycle)] for i in range(n_plots)]
 
     # --- 3. Figure layout
-    fig_width_in  = 10 / 3                       # ~3.33" (MNRAS column width)
     nrows, ncols  = (1, n_plots) if orientation == "horizontal" else (n_plots, 1)
+    fig_width_in  = 10 / 3 * ncols                      # ~3.33" (MNRAS column width)
     subplot_w     = fig_width_in / ncols
     fig_height_in = subplot_w * nrows
     fig, axes     = plt.subplots(

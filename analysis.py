@@ -606,7 +606,186 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
     if save_fig:
         from mu.plotting import save_fig
         save_fig(fig=fig, output_path=output_path, overwrite=overwrite)
+
+    plt.close(fig)
     return radius_kpc
+
+
+
+
+
+
+
+
+
+#########################################################################################################
+def radial_profile_from_df(
+    df_path: str | Path,
+    *,
+    ref_header: fits.Header,
+    annuli_thickness: int | float = None,
+    skipped_pixels: int = None,
+    distance: float = None,
+    maximum_distance: float = None,
+    save: bool = False,
+    overwrite: bool = False,
+    output_path: str = None,
+) -> None:
+    """
+    Plot dust SED radial profile.
+
+    Parameters
+    ----------
+    df_path
+        Path to the CSV produced by *read_sed_fitting_results* (or equivalent).
+    ref_header
+        FITS header from which to read the pixel scale (uses the absolute value
+        of ``CDELT1``).
+    annuli_thickness
+        Width of each annulus in *pixels* (default 3).
+    skipped_pixels
+        Central pixels to ignore before the first annulus (default 10 px).
+    distance
+        Galaxy distance **in Mpc**. Converted internally to kpc (default 3.63 Mpc).
+    maximum_distance
+        Optional radial cut‐off **in kpc** – points beyond this are omitted from the plot.
+    save
+        If ``True`` the figure is written to ``output_path``.
+    overwrite
+        Allow an existing file at ``output_path`` to be overwritten.
+    output_path
+        Destination for the PNG/PDF/… file when *save* is ``True``.
+        When omitted an automatic name is constructed next to the CSV.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure instance – the caller can further modify it if required.
+    """
+    import pandas as pd
+    import re
+
+    # --- 0. Helper function read df
+    def read_sed_fitting_results(file_path):
+        """
+        Reads the SED fitting results CSV file and returns a pandas DataFrame.
+        
+        Parameters:
+            file_path (str):
+        
+        Returns:
+            pd.DataFrame: 
+        """
+        
+        # Read the file while skipping metadata lines
+        with open(file_path, "r") as file:
+            lines = file.readlines()
+        
+        # Find the start of the actual data
+        for i, line in enumerate(lines):
+            if line.startswith("#  Object"):  # Identifying the header line
+                header_line_index = i
+                break
+
+        # Read the data into a DataFrame while stripping trailing commas
+        df = pd.read_csv(
+            file_path, 
+            skiprows=header_line_index+3, 
+            names=[
+                "Object", "Model",
+                "Mass_Median", "Mass_PosErr", "Mass_NegErr",
+                "Temp_Median", "Temp_PosErr", "Temp_NegErr",
+                "Beta_Median", "Beta_PosErr", "Beta_NegErr"
+            ],
+            engine="python",  # More flexible parser
+            delimiter=",",  # The file has commas, so use delimiter
+            converters={col: lambda x: x.strip() if isinstance(x, str) else x for col in range(11)}  # Strip extra spaces
+        )
+        
+        # Convert numerical columns to float
+        numerical_cols = df.columns[2:]
+        df[numerical_cols] = df[numerical_cols].astype(float)
+        
+        return df
+
+
+    # --- 1. Read data and prepare
+    df_path = Path(df_path)
+    df = read_sed_fitting_results(df_path)
+    pix_scale_arcmin = abs(ref_header["CDELT1"]) * 60.0  # arcmin px⁻¹
+
+    # Region index encoded as “…region_XXX…”, case-insensitive
+    region_idx = (
+        df["Object"]
+        .str.extract(r"region_(\d+)", flags=re.IGNORECASE)
+        .astype(int)[0]
+    )
+
+    mid_pix = skipped_pixels + annuli_thickness * region_idx + annuli_thickness / 2
+    radius_arcmin = mid_pix * pix_scale_arcmin
+    df["Radius_arcmin"] = radius_arcmin
+
+    # small-angle formula: θ ≈ r / D
+    D_kpc = (distance * u.Mpc).to(u.kpc).value
+    theta_rad = np.deg2rad(radius_arcmin / 60.0)  # arcmin → deg → rad
+    radius_kpc = theta_rad * D_kpc
+    df["Radius_kpc"] = radius_kpc
+
+    # --- 2. Optional radial cut
+    if maximum_distance is not None:
+        df = df[df["Radius_kpc"] <= maximum_distance]
+
+    # --- 3. Plot
+    fig, axes = plt.subplots(nrows=3, figsize=(5, 8), sharex=True)
+    x = df["Radius_arcmin"]  # switch to "Radius_kpc" if preferred
+
+    # 3a. Dust mass
+    axes[0].errorbar(
+        x,
+        df["Mass_Median"],
+        yerr=[df["Mass_NegErr"], df["Mass_PosErr"]],
+        fmt="o",
+        c="navy",
+        capsize=5,
+    )
+    axes[0].set_ylabel(r"$M_\mathrm{dust}\;(\log M_\odot)$", fontsize=15)
+
+    # 3b. Dust temperature
+    axes[1].errorbar(
+        x,
+        df["Temp_Median"],
+        yerr=[df["Temp_NegErr"], df["Temp_PosErr"]],
+        fmt="o",
+        c="red",
+        capsize=5,
+    )
+    axes[1].set_ylabel(r"$T_\mathrm{dust}$ (K)", fontsize=15)
+
+    # 3c. β
+    axes[2].errorbar(
+        x,
+        df["Beta_Median"],
+        yerr=[df["Beta_NegErr"], df["Beta_PosErr"]],
+        fmt="o",
+        c="green",
+        capsize=5,
+    )
+    axes[2].set_ylabel(r"$\beta$", fontsize=15)
+    axes[2].set_xlabel("Galactocentric radius (arcmin)", fontsize=15)
+
+    plt.tight_layout()
+    plt.show()
+
+    # --- 4. Save
+    if save:
+        out = Path(output_path) if output_path else df_path.with_suffix(".png")
+        if out.exists() and not overwrite:
+            raise FileExistsError(
+                f"{out} exists. Use overwrite=True to replace it."
+            )
+        fig.savefig(out)
+    plt.close(fig)
+
     
     
     
