@@ -12,21 +12,22 @@ from reproject import reproject_adaptive
 from astropy.nddata import Cutout2D
 
 
-def read_fits(data_path: str,
-              data_ext: int = 0, 
-              error_path: str | None = None,
-              error_ext: int = 0, 
-              SNR_cut: bool = False, 
-              SNR_threshold: float | None = None,
-              min_value: float | None = None,
-              max_value: float | None = None,
-              min_err_value: float | None = None,
-              max_err_value: float | None = None
-             ) -> tuple[np.ndarray, fits.Header, np.ndarray | None, fits.Header | None]:
+def read_fits(
+    data_path: str,
+    data_ext: int = 0,
+    error_path: str | None = None,
+    error_ext: int = 0,
+    SNR_cut: bool = False,
+    SNR_threshold: float | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    min_err_value: float | None = None,
+    max_err_value: float | None = None,
+) -> tuple[np.ndarray, fits.Header, np.ndarray | None, fits.Header | None]:
     """
     Read the FITS data from a file and (optionally) an error file,
     applying an SNR cut if requested.
-    
+
     Parameters
     ----------
     data_path : str
@@ -53,7 +54,7 @@ def read_fits(data_path: str,
     max_err_value : float, optional
         If provided, any pixel in both data and error for which error > max_err_value
         is replaced with NaN.
-    
+
     Returns
     -------
     data : np.ndarray
@@ -69,7 +70,6 @@ def read_fits(data_path: str,
         raise FileNotFoundError(f"Data file not found: {data_path}")
 
     data, header = fits.getdata(data_path, ext=data_ext, header=True)
-    
 
     # --- 2. Check error file and read error
     error = None
@@ -79,20 +79,20 @@ def read_fits(data_path: str,
         error_file = Path(error_path)
         if not error_file.exists():
             raise FileNotFoundError(f"Error file not found: {error_path}")
-        
+
         error, error_header = fits.getdata(error_path, ext=error_ext, header=True)
-        
+
         # If SNR cut is requested, apply threshold
         if SNR_cut:
             if SNR_threshold is None:
                 raise ValueError("SNR_threshold must be provided if SNR_cut is True.")
-            
+
             print(f"SNR threshold is set to {SNR_threshold}.\n")
-            
+
             # Compare data/error units (optional, if your headers store them)
-            data_unit  = header.get("SIGUNIT") or header.get("BUNIT")
+            data_unit = header.get("SIGUNIT") or header.get("BUNIT")
             error_unit = error_header.get("SIGUNIT") or error_header.get("BUNIT")
-            
+
             if data_unit and error_unit and (data_unit != error_unit):
                 raise ValueError(
                     "Data and Error files have different units. "
@@ -102,10 +102,9 @@ def read_fits(data_path: str,
             # Mask data based on SNR
             mask_snr = (data / error) < SNR_threshold
             data = np.where(mask_snr, np.nan, data)
-            
+
             num_masked = np.count_nonzero(mask_snr)
             print(f"{num_masked} pixels (SNR < {SNR_threshold}) are changed to NaN.\n")
-    
 
     # --- 3. Apply min_value / max_value masking
     # 3a. Mask by min_value / max_value (data + error)
@@ -126,11 +125,13 @@ def read_fits(data_path: str,
 
         if error is not None:
             error = np.where(mask_max, np.nan, error)
-        
+
     # 3b. Mask by min_err_value / max_err_value (error + data)
     # Only meaningful if we actually have an error file
     if (min_err_value is not None or max_err_value is not None) and error is None:
-        raise ValueError("min_err_value/max_err_value given, but no error file was provided.")
+        raise ValueError(
+            "min_err_value/max_err_value given, but no error file was provided."
+        )
 
     if min_err_value is not None and error is not None:
         mask_err_min = error < min_err_value
@@ -146,7 +147,6 @@ def read_fits(data_path: str,
         num_masked_err_max = np.count_nonzero(mask_err_max)
         print(f"{num_masked_err_max} pixels have error > {max_err_value} => masked.\n")
 
-        
     # --- 4. Return the results
     # Return either (data, header, error, error_header) or (data, header)
     if error is not None:
@@ -155,26 +155,15 @@ def read_fits(data_path: str,
         return data, header
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################
-def convolve_fits(data: np.ndarray,
-                  kernel_data: np.ndarray,
-                  error: np.ndarray | None = None,
-                 ) -> tuple[np.ndarray, np.ndarray | None]:
+###############################################################################
+def convolve_fits(
+    data: np.ndarray,
+    kernel_data: np.ndarray,
+    error: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Convolve a FITS data and (optionally) an error file.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -184,7 +173,7 @@ def convolve_fits(data: np.ndarray,
         Must be normalized (sum ~ 1).
     error : np.ndarray, optional
         2D error array corresponding to the data, if available.
-    
+
     Returns
     -------
     convolved_data : np.ndarray
@@ -203,13 +192,15 @@ def convolve_fits(data: np.ndarray,
         raise TypeError(f"'kernel_data' is not a NumPy array. Got {type(kernel_data)}.")
     if kernel_data.ndim != 2:
         raise ValueError(f"'kernel_data' must be 2D. Got {kernel_data.ndim}D.")
-    
+
     # 1c. Check normalization of kernel data
     kernel_sum = np.nansum(kernel_data)
     if not np.isclose(kernel_sum, 1.0, atol=1e-3):
-        raise ValueError(f"Kernel sum is {kernel_sum:.4g}, which is not close to 1. "
-                         "Ensure the kernel is normalized.")  
-    
+        raise ValueError(
+            f"Kernel sum is {kernel_sum:.4g}, which is not close to 1. "
+            "Ensure the kernel is normalized."
+        )
+
     # --- 2. Convolve data
     print("Convolving data with the provided kernel ...")
     convolved_data = convolve_fft(
@@ -223,7 +214,6 @@ def convolve_fits(data: np.ndarray,
         preserve_nan=True,
     )
 
-    
     # --- 3. Convolve error (optional)
 
     convolved_error = None  # Default if no error map is provided.
@@ -233,8 +223,8 @@ def convolve_fits(data: np.ndarray,
         if not isinstance(error, np.ndarray):
             raise TypeError(f"'error' is not a NumPy array. Got {type(error)}.")
         if error.ndim != 2:
-            raise ValueError(f"'error' must be 2D. Got {error.ndim}D.") 
-    
+            raise ValueError(f"'error' must be 2D. Got {error.ndim}D.")
+
         # Convolve error map
         print("Convolving error with the squared kernel ...")
         # For error propagation in convolution, we convolve error^2 with kernel^2,
@@ -250,7 +240,7 @@ def convolve_fits(data: np.ndarray,
             preserve_nan=True,
         )
         convolved_error = np.sqrt(convolved_variance)
-        
+
     print("Completed.")
     # Return either (convolved_data) or (convolved_data, convolved_error)
     if convolved_error is not None:
@@ -259,27 +249,16 @@ def convolve_fits(data: np.ndarray,
         return convolved_data
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################       
-def reproject_fits(data: np.ndarray,
-                   data_header: fits.Header,
-                   target_header: fits.Header,
-                   error: np.ndarray | None = None,
-                  ) -> tuple[np.ndarray, np.ndarray | None]:
+###############################################################################
+def reproject_fits(
+    data: np.ndarray,
+    data_header: fits.Header,
+    target_header: fits.Header,
+    error: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Reproject a FITS data and (optionally) an error file.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -290,14 +269,14 @@ def reproject_fits(data: np.ndarray,
         Target header.
     error : np.ndarray, optional
         2D error array corresponding to the data, if available.
-    
+
     Returns
     -------
     reprojected_data : np.ndarray
         The reprojected data array (same shape as `data`).
     reprojected_error : np.ndarray, optional
         The reprojected error array if an `error` was provided; otherwise `None`.
-    """  
+    """
     # --- 1. Check data
     if not isinstance(data, np.ndarray):
         raise TypeError(f"'data' is not a NumPy array. Got {type(data)}.")
@@ -306,19 +285,21 @@ def reproject_fits(data: np.ndarray,
 
     # 1b. Check headers
     if not isinstance(data_header, fits.Header):
-        raise TypeError(f"'data_header' is not a fits.Header object. Got {type(data_header)}.")
+        raise TypeError(
+            f"'data_header' is not a fits.Header object. Got {type(data_header)}."
+        )
     if not isinstance(target_header, fits.Header):
-        raise TypeError(f"'target_header' is not a fits.Header object. Got {type(target_header)}.")
-    
-    
+        raise TypeError(
+            f"'target_header' is not a fits.Header object. Got {type(target_header)}."
+        )
+
     # --- 2. Reproject data
     print("Reprojecting data to the provided target WCS...\n")
     reprojected_data, _ = reproject_adaptive(
         input_data=(data, data_header),
         output_projection=target_header,
-        conserve_flux=True
+        conserve_flux=True,
     )
-    
 
     # --- 3. Reproject error (optional)
 
@@ -329,18 +310,18 @@ def reproject_fits(data: np.ndarray,
         if not isinstance(error, np.ndarray):
             raise TypeError(f"'error' is not a NumPy array. Got {type(error)}.")
         if error.ndim != 2:
-            raise ValueError(f"'error' must be 2D. Got {error.ndim}D.") 
-    
+            raise ValueError(f"'error' must be 2D. Got {error.ndim}D.")
+
         # 3b. Reproject the error map
         print("Reprojecting error to the target WCS...\n")
         # For error propagation, reproject error**2, then take sqrt
         reprojected_variance, _ = reproject_adaptive(
             input_data=(error**2, data_header),
             output_projection=target_header,
-            conserve_flux=True
+            conserve_flux=True,
         )
         reprojected_error = np.sqrt(reprojected_variance)
-        
+
     print("Completed.")
     # Return either (reprojected_data) or (reprojected_data, reprojected_error)
     if reprojected_error is not None:
@@ -349,20 +330,13 @@ def reproject_fits(data: np.ndarray,
         return reprojected_data
 
 
-
-
-
-
-
-
-
-#########################################################################################################        
+###############################################################################
 def save_fits(
     data: np.ndarray,
     data_header: fits.Header,
     output_path: str,
-    overwrite: bool = False
-    ) -> None:
+    overwrite: bool = False,
+) -> None:
     """
     Save a 2D data array and its FITS header to a file.
 
@@ -403,26 +377,13 @@ def save_fits(
             # Catch any other OSError
             raise OSError(
                 f"An error occurred while trying to write the file to '{out_path}'."
-            ) from e  
+            ) from e
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################
-# v250428 - Now it can work with units, too! 
-def subtract_background( 
-    data: np.ndarray | Quantity,
-    background_value: float | Quantity
+###############################################################################
+# v250428 - Now it can work with units, too!
+def subtract_background(
+    data: np.ndarray | Quantity, background_value: float | Quantity
 ) -> np.ndarray | Quantity:
     """
     Subtract a constant background level from a 2D flux map, with full astropy.units support.
@@ -448,7 +409,7 @@ def subtract_background(
     """
     # Detect which inputs are Quantities
     data_is_qty = isinstance(data, Quantity)
-    bg_is_qty   = isinstance(background_value, Quantity)
+    bg_is_qty = isinstance(background_value, Quantity)
 
     # Case 1: neither has a unit → plain subtraction
     if not data_is_qty and not bg_is_qty:
@@ -486,26 +447,24 @@ def subtract_background(
     return data - bg_converted
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################
-def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=None, 
-                            distance_mpc=None, gc_ra_deg=None, gc_dec_deg=None, xlim=None,
-                            plot_style: str | None = None,   
-                            save_fig: bool = False, output_path: str | None = None, overwrite: bool = False):
+###############################################################################
+def radial_profile_from_SED(
+    mass_map,
+    temperature_map,
+    beta_map=None,
+    header=None,
+    distance_mpc=None,
+    gc_ra_deg=None,
+    gc_dec_deg=None,
+    xlim=None,
+    plot_style: str | None = None,
+    save_fig: bool = False,
+    output_path: str | None = None,
+    overwrite: bool = False,
+):
     """
     Plots the radial profiles from SED maps of a galaxy.
-    
+
     Parameters
     ----------
       mass_map : np.ndarray
@@ -514,7 +473,7 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
           Dust temperature map (in Kelvin).
       beta_map (2D array, optional): np.ndarray, optional
           Dust beta map. If not provided, only mass and temperature will be plotted.
-      header : 
+      header :
           Header containing WCS information.
       distance : float
           Distance to the galaxy in Mpc.
@@ -543,7 +502,7 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
         raise Exception("Need header!")
     if gc_ra_deg is None or gc_dec_deg is None:
         raise Exception("Need center coordinates of the galaxy in deg!")
-        
+
     # Create a WCS object from the header
     wcs = WCS(header)
 
@@ -555,16 +514,16 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
     ra_map, dec_map = wcs.all_pix2world(x_indices, y_indices, 0)
 
     # Compute the angular separation from the galaxy center for each pixel
-    galaxy_center  = SkyCoord(ra=gc_ra_deg*u.deg, dec=gc_dec_deg*u.deg, frame='icrs')
-    pixel_coords   = SkyCoord(ra=ra_map*u.deg,    dec=dec_map*u.deg,    frame='icrs')
-    separation     = galaxy_center.separation(pixel_coords)
+    galaxy_center = SkyCoord(ra=gc_ra_deg * u.deg, dec=gc_dec_deg * u.deg, frame="icrs")
+    pixel_coords = SkyCoord(ra=ra_map * u.deg, dec=dec_map * u.deg, frame="icrs")
+    separation = galaxy_center.separation(pixel_coords)
     separation_deg = separation.deg
     separation_rad = np.deg2rad(separation_deg)
-    
+
     # Convert angular separation to physical radius in kpc.
-    conversion_factor = distance_mpc * 1e3 # (kpc)
+    conversion_factor = distance_mpc * 1e3  # (kpc)
     radius_kpc = separation_rad * conversion_factor
-    
+
     # Apply a custom style file if provided
     if plot_style is not None:
         style_path = Path(plot_style)
@@ -575,50 +534,48 @@ def radial_profile_from_SED(mass_map, temperature_map, beta_map=None, header=Non
 
     # Choose number of subplots based on beta_map availability
     if beta_map is None:
-        fig, axs = plt.subplots(2, 1, sharex=True, figsize=(3.333*2, 3*2))
+        fig, axs = plt.subplots(2, 1, sharex=True, figsize=(3.333 * 2, 3 * 2))
     else:
-        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(3.333*3, 3*3))
+        fig, axs = plt.subplots(3, 1, sharex=True, figsize=(3.333 * 3, 3 * 3))
 
     # Plot 1: Radius vs Mass
     axs[0].scatter(radius_kpc.flatten(), mass_map.flatten(), s=1, alpha=0.5, c="navy")
     axs[0].set_ylabel("$\sum$ (M$_\odot$/pc$^2$)")
-    #axs[0].set_yscale('log')
+    # axs[0].set_yscale('log')
 
     # Plot 2: Radius vs Temperature
-    axs[1].scatter(radius_kpc.flatten(), temperature_map.flatten(), s=1, alpha=0.5, c="navy")
+    axs[1].scatter(
+        radius_kpc.flatten(), temperature_map.flatten(), s=1, alpha=0.5, c="navy"
+    )
     axs[1].set_ylabel("T$_{d}$ (K)")
-    
+
     if beta_map is not None:
         # Plot 3: Radius vs Beta
-        axs[2].scatter(radius_kpc.flatten(), beta_map.flatten(), s=1, alpha=0.5, c="navy")
+        axs[2].scatter(
+            radius_kpc.flatten(), beta_map.flatten(), s=1, alpha=0.5, c="navy"
+        )
         axs[2].set_ylabel(r"$\beta$")
         axs[2].set_xlabel("Radius (kpc)")
     else:
         axs[1].set_xlabel("Radius (kpc)")
-        
+
     if xlim is not None:
         for ax_i in axs:
             ax_i.set_xlim(xlim[0], xlim[1])
 
     plt.subplots_adjust(hspace=0)
     plt.show()
-    
+
     if save_fig:
         from mu.plotting import save_fig
+
         save_fig(fig=fig, output_path=output_path, overwrite=overwrite)
 
     plt.close(fig)
     return radius_kpc
 
 
-
-
-
-
-
-
-
-#########################################################################################################
+###############################################################################
 def radial_profile_from_df(
     df_path: str | Path,
     *,
@@ -669,18 +626,18 @@ def radial_profile_from_df(
     def read_sed_fitting_results(file_path):
         """
         Reads the SED fitting results CSV file and returns a pandas DataFrame.
-        
+
         Parameters:
             file_path (str):
-        
+
         Returns:
-            pd.DataFrame: 
+            pd.DataFrame:
         """
-        
+
         # Read the file while skipping metadata lines
         with open(file_path, "r") as file:
             lines = file.readlines()
-        
+
         # Find the start of the actual data
         for i, line in enumerate(lines):
             if line.startswith("#  Object"):  # Identifying the header line
@@ -689,25 +646,34 @@ def radial_profile_from_df(
 
         # Read the data into a DataFrame while stripping trailing commas
         df = pd.read_csv(
-            file_path, 
-            skiprows=header_line_index+3, 
+            file_path,
+            skiprows=header_line_index + 3,
             names=[
-                "Object", "Model",
-                "Mass_Median", "Mass_PosErr", "Mass_NegErr",
-                "Temp_Median", "Temp_PosErr", "Temp_NegErr",
-                "Beta_Median", "Beta_PosErr", "Beta_NegErr"
+                "Object",
+                "Model",
+                "Mass_Median",
+                "Mass_PosErr",
+                "Mass_NegErr",
+                "Temp_Median",
+                "Temp_PosErr",
+                "Temp_NegErr",
+                "Beta_Median",
+                "Beta_PosErr",
+                "Beta_NegErr",
             ],
             engine="python",  # More flexible parser
             delimiter=",",  # The file has commas, so use delimiter
-            converters={col: lambda x: x.strip() if isinstance(x, str) else x for col in range(11)}  # Strip extra spaces
+            converters={
+                col: lambda x: x.strip() if isinstance(x, str) else x
+                for col in range(11)
+            },  # Strip extra spaces
         )
-        
+
         # Convert numerical columns to float
         numerical_cols = df.columns[2:]
         df[numerical_cols] = df[numerical_cols].astype(float)
-        
-        return df
 
+        return df
 
     # --- 1. Read data and prepare
     df_path = Path(df_path)
@@ -716,9 +682,7 @@ def radial_profile_from_df(
 
     # Region index encoded as “…region_XXX…”, case-insensitive
     region_idx = (
-        df["Object"]
-        .str.extract(r"region_(\d+)", flags=re.IGNORECASE)
-        .astype(int)[0]
+        df["Object"].str.extract(r"region_(\d+)", flags=re.IGNORECASE).astype(int)[0]
     )
 
     mid_pix = skipped_pixels + annuli_thickness * region_idx + annuli_thickness / 2
@@ -780,24 +744,15 @@ def radial_profile_from_df(
     if save:
         out = Path(output_path) if output_path else df_path.with_suffix(".png")
         if out.exists() and not overwrite:
-            raise FileExistsError(
-                f"{out} exists. Use overwrite=True to replace it."
-            )
+            raise FileExistsError(f"{out} exists. Use overwrite=True to replace it.")
         fig.savefig(out)
     plt.close(fig)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-#########################################################################################################
-def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
-                quick_plot=False):
+
+###############################################################################
+def cutout_data(
+    data, header, center_ra, center_dec, width_deg, height_deg, quick_plot=False
+):
     """
     Create a cutout (sub-image) around the specified center RA/Dec, using
     a rectangular area given in degrees (width x height).
@@ -825,12 +780,12 @@ def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
         The 2D data array of the cutout.
     cut_header : FITS header
         A header for the cutout image, updated with the appropriate WCS.
-    """    
+    """
     # Create a WCS object from the header
     wcs_in = WCS(header)
 
     # Define the central sky coordinate
-    sky_coord = SkyCoord(center_ra, center_dec, unit='deg')
+    sky_coord = SkyCoord(center_ra, center_dec, unit="deg")
 
     # Define the size of the cutout region in (height, width)
     cutout_size = (height_deg, width_deg) * u.deg
@@ -845,20 +800,26 @@ def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
     cut_header = cutout.wcs.to_header()
 
     # following three lines are updated on v250510
-    cut_header["NAXIS"]  = 2
-    cut_header["NAXIS1"] = cut_data.shape[1]   # x‑size
-    cut_header["NAXIS2"] = cut_data.shape[0]   # y‑size
+    cut_header["NAXIS"] = 2
+    cut_header["NAXIS1"] = cut_data.shape[1]  # x‑size
+    cut_header["NAXIS2"] = cut_data.shape[0]  # y‑size
 
     # Optional quick plot
     if quick_plot:
         # Get the pixel slices corresponding to the cutout
         yslice, xslice = cutout.slices_original
-        
+
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
         # --- Left subplot: original data with rectangle ---
         ax1 = axes[0]
-        ax1.imshow(data, origin='lower', cmap='gray', vmin=np.nanpercentile(data, 5), vmax=np.nanpercentile(data, 95))
+        ax1.imshow(
+            data,
+            origin="lower",
+            cmap="gray",
+            vmin=np.nanpercentile(data, 5),
+            vmax=np.nanpercentile(data, 95),
+        )
         ax1.set_title("Input Data")
 
         # Draw a rectangle to show the cutout region
@@ -866,15 +827,21 @@ def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
             (xslice.start, yslice.start),
             xslice.stop - xslice.start,
             yslice.stop - yslice.start,
-            edgecolor='red',
-            facecolor='none',
-            linewidth=1.5
+            edgecolor="red",
+            facecolor="none",
+            linewidth=1.5,
         )
         ax1.add_patch(rect)
 
         # --- Right subplot: cutout data ---
         ax2 = axes[1]
-        ax2.imshow(cut_data, origin='lower', cmap='gray', vmin=np.nanpercentile(data, 5), vmax=np.nanpercentile(data, 95))
+        ax2.imshow(
+            cut_data,
+            origin="lower",
+            cmap="gray",
+            vmin=np.nanpercentile(data, 5),
+            vmax=np.nanpercentile(data, 95),
+        )
         ax2.set_title("Cutout Region")
 
         plt.tight_layout()
@@ -882,16 +849,8 @@ def cutout_data(data, header, center_ra, center_dec, width_deg, height_deg,
 
     return cut_data, cut_header
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-#########################################################################################################
+
+##############################################################################
 def elliptical_annulus_photometry(
     data: np.ndarray,
     header: fits.Header,
@@ -921,8 +880,8 @@ def elliptical_annulus_photometry(
     bkg_mean : float           weighted mean flux in background annulus
     """
     from photutils.aperture import SkyEllipticalAperture
-    
-    # --- 1. Basic Checks 
+
+    # --- 1. Basic Checks
     if not isinstance(data, np.ndarray):
         raise TypeError("'data' must be a NumPy array")
     if data.ndim != 2:
@@ -942,47 +901,59 @@ def elliptical_annulus_photometry(
         raise TypeError(f"{name} must be number or Quantity")
 
     # --- 3. Coordinates
-    wcs   = WCS(header)
-    galaxy_centre = SkyCoord(_ensure_deg(center_ra, "center_ra"),
-                             _ensure_deg(center_dec, "center_dec"))
+    wcs = WCS(header)
+    galaxy_centre = SkyCoord(
+        _ensure_deg(center_ra, "center_ra"), _ensure_deg(center_dec, "center_dec")
+    )
 
     # --- 4. Science Apertures
-    ap_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(outer_semi_major, "a_out"),
-                                   _ensure_deg(outer_semi_minor, "b_out"),
-                                   _ensure_deg(position_angle, "theta"))
-    ap_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(inner_semi_major, "a_in"),
-                                   _ensure_deg(inner_semi_minor, "b_in"),
-                                   _ensure_deg(position_angle, "theta"))
-    
+    ap_out = SkyEllipticalAperture(
+        galaxy_centre,
+        _ensure_deg(outer_semi_major, "a_out"),
+        _ensure_deg(outer_semi_minor, "b_out"),
+        _ensure_deg(position_angle, "theta"),
+    )
+    ap_in = SkyEllipticalAperture(
+        galaxy_centre,
+        _ensure_deg(inner_semi_major, "a_in"),
+        _ensure_deg(inner_semi_minor, "b_in"),
+        _ensure_deg(position_angle, "theta"),
+    )
+
     # ----- 4a. Fractional coverage images for the outer and inner ellipses
     cov_out = ap_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-    cov_in  = ap_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
+    cov_in = ap_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
 
     # ----- 4b. Pixel centre must be inside outer and not inside inner ellipse
     mask_annulus = (cov_out > 0) & ~(cov_in > 0)
 
     # --- 5. Background Apertures
-    ap_bkg_out = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_outer_semi_major, "bkg_a_out"),
-                                       _ensure_deg(bkg_outer_semi_minor, "bkg_b_out"),
-                                       _ensure_deg(position_angle, "theta"))
-    ap_bkg_in  = SkyEllipticalAperture(galaxy_centre, _ensure_deg(bkg_inner_semi_major, "bkg_a_in"),
-                                       _ensure_deg(bkg_inner_semi_minor, "bkg_b_in"),
-                                       _ensure_deg(position_angle, "theta"))
-    
+    ap_bkg_out = SkyEllipticalAperture(
+        galaxy_centre,
+        _ensure_deg(bkg_outer_semi_major, "bkg_a_out"),
+        _ensure_deg(bkg_outer_semi_minor, "bkg_b_out"),
+        _ensure_deg(position_angle, "theta"),
+    )
+    ap_bkg_in = SkyEllipticalAperture(
+        galaxy_centre,
+        _ensure_deg(bkg_inner_semi_major, "bkg_a_in"),
+        _ensure_deg(bkg_inner_semi_minor, "bkg_b_in"),
+        _ensure_deg(position_angle, "theta"),
+    )
+
     # ----- 5a. Fractional coverage images for the outer and inner ellipses
     cov_bkg_out = ap_bkg_out.to_pixel(wcs).to_mask("exact").to_image(data.shape)
-    cov_bkg_in  = ap_bkg_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
+    cov_bkg_in = ap_bkg_in.to_pixel(wcs).to_mask("exact").to_image(data.shape)
 
     # ----- 5b. Pixel centre must be inside outer and not inside inner ellipse
     mask_bkg = (cov_bkg_out > 0) & ~(cov_bkg_in > 0)
 
-
     # --- 6. Science Flux (weighted mean on the ring)
-    sci_ok   = mask_annulus & np.isfinite(data)
-    weights  = cov_out[sci_ok]
+    sci_ok = mask_annulus & np.isfinite(data)
+    weights = cov_out[sci_ok]
     sci_vals = data[sci_ok]
 
-    n_eff    = weights.sum()
+    n_eff = weights.sum()
     if n_eff == 0:
         raise RuntimeError("Science annulus contains no valid pixels")
 
@@ -998,40 +969,39 @@ def elliptical_annulus_photometry(
             Returns the smallest x such that Σ w_i (v_i <= x) ≥ 0.5 Σ w_i.
             """
             srt = np.argsort(values)
-            v   = values[srt]
-            w   = weights[srt]
+            v = values[srt]
+            w = weights[srt]
 
             cdf = np.cumsum(w)
             cut = 0.5 * w.sum()
             return v[np.searchsorted(cdf, cut)]
-        
+
         stat_val = _weighted_median(sci_vals, weights)
 
-
     # --- 7. Background Stats
-    bkg_ok    = mask_bkg & np.isfinite(data)
-    bkg_w     = cov_bkg_out[bkg_ok]
-    bkg_vals  = data[bkg_ok]
+    bkg_ok = mask_bkg & np.isfinite(data)
+    bkg_w = cov_bkg_out[bkg_ok]
+    bkg_vals = data[bkg_ok]
     if bkg_vals.size == 0:
         raise RuntimeError("Background annulus contains no valid pixels")
 
     if method == "mean":
         # Weighted mean
-        bkg_val  = (bkg_w * bkg_vals).sum() / bkg_w.sum()
+        bkg_val = (bkg_w * bkg_vals).sum() / bkg_w.sum()
     elif method == "median":
         # Weighted median
         bkg_val = _weighted_median(bkg_vals, bkg_w)
 
-    bkg_std  = np.sqrt( ((bkg_w * (bkg_vals - bkg_val) **2).sum()) / bkg_w.sum() )
+    bkg_std = np.sqrt(((bkg_w * (bkg_vals - bkg_val) ** 2).sum()) / bkg_w.sum())
     stat_err = bkg_std / np.sqrt(n_eff)
     print(f"{method.capitalize()} flux = {stat_val:.6e} ± {stat_err:.6e}")
     print(f"Background {method} = {bkg_val:.6e}\n")
     print(f"Background σ = {bkg_std:.6e}")
 
-
     # --- 8. Quick Plot
     if quick_plot:
         import matplotlib.pyplot as plt
+
         vmin, vmax = np.nanpercentile(data, [1, 99])
         fig, ax = plt.subplots(figsize=(6, 6))
         ax.imshow(data, origin="lower", cmap="gray", vmin=vmin, vmax=vmax)
@@ -1045,9 +1015,212 @@ def elliptical_annulus_photometry(
     # --- 9. Save the fits if requested
     if save_fname is not None:
         masked_data = np.full_like(data, np.nan, dtype=data.dtype)
-        masked_data[mask_annulus] = data[mask_annulus]      # keep science pixels only
+        masked_data[mask_annulus] = data[mask_annulus]  # keep science pixels only
 
         fits.writeto(save_fname, masked_data, header, overwrite=True)
         print(f"wrote annulus mask ->  {save_fname}")
-        
+
     return stat_val, stat_err, bkg_std, bkg_val
+
+
+##############################################################################
+def read_pickle_SED_results(
+    path: str,
+    target_nx: int,
+    target_ny: int,
+    model_key: str = "1TFB",
+    stat_key: str = "median",
+    quick_plot: bool = False,
+    verbose: bool = True,
+):
+    import pandas as pd
+    import numpy as np
+    import astropy.units as u
+    import matplotlib.pyplot as plt
+
+    # ------------------------------------------------------------------
+    # 1) Read pickle
+    # ------------------------------------------------------------------
+    whole_map_df = pd.read_pickle(path)
+
+    if verbose:
+        print(f"model_key={model_key}, stat_key={stat_key}")
+        print(f"Target shape: ({target_ny}, {target_nx})")
+
+    # ------------------------------------------------------------------
+    # 2) Collect indices from keys
+    # ------------------------------------------------------------------
+    indices = []  # (key, ix, iy)
+    xs, ys = [], []
+
+    for key in whole_map_df.keys():
+        try:
+            # Expect "..._<ix>x<iy>"
+            suffix = key.rsplit("_", 1)[1]  # e.g. "300x33"
+            ix_str, iy_str = suffix.split("x")  # e.g. "300", "33"
+            ix, iy = int(ix_str), int(iy_str)
+        except Exception:
+            raise RuntimeError(
+                f"This should not be happening but key '{key}' failed to parse."
+            )
+
+        indices.append((key, ix, iy))
+        xs.append(ix)
+        ys.append(iy)
+
+    if not indices:
+        raise RuntimeError("No pixel-like keys found in the pickle file.")
+
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+
+    if verbose:
+        print(f"x_min, x_max: {x_min}, {x_max}")
+        print(f"y_min, y_max: {y_min}, {y_max}")
+
+    # ------------------------------------------------------------------
+    # 3) Decide 0-based or 1-based from the *minimum* index
+    # ------------------------------------------------------------------
+    if x_min == 0 and y_min == 0:
+        x_offset = 0
+        y_offset = 0
+        if verbose:
+            print("Detected 0-based indexing (0..N-1).")
+    elif x_min == 1 and y_min == 1:
+        x_offset = 1
+        y_offset = 1
+        if verbose:
+            print("Detected 1-based indexing (1..N).")
+    else:  # if xmin xmax values are not equal (which is very likely due to NaNs in input data while fitting)
+        offset_value = min(x_min, y_min)
+        x_offset, y_offset = offset_value, offset_value
+        if x_offset != 0 and x_offset != 1:
+            raise RuntimeError(f"Unexpected index offset value: {x_offset}")
+
+    # After subtracting offset, the valid i/j indices should be:
+    #    i in [0, x_max - x_offset]
+    #    j in [0, y_max - y_offset]
+    i_max = x_max - x_offset
+    j_max = y_max - y_offset
+
+    if i_max >= target_nx or j_max >= target_ny:
+        raise RuntimeError(
+            f"Fitted pixels exceed target size after applying offset.\n"
+            f"  i_max = {i_max}, target_nx - 1 = {target_nx - 1}\n"
+            f"  j_max = {j_max}, target_ny - 1 = {target_ny - 1}\n"
+            "Either increase target_nx/target_ny or check your index base."
+        )
+
+    # ------------------------------------------------------------------
+    # 4) Allocate full-size NaN arrays
+    # ------------------------------------------------------------------
+    mass_map = np.full((target_ny, target_nx), np.nan)
+    mass_err_lo_map = np.full((target_ny, target_nx), np.nan)
+    mass_err_hi_map = np.full((target_ny, target_nx), np.nan)
+
+    temp_map = np.full((target_ny, target_nx), np.nan)
+    temp_err_lo_map = np.full((target_ny, target_nx), np.nan)
+    temp_err_hi_map = np.full((target_ny, target_nx), np.nan)
+
+    # ------------------------------------------------------------------
+    # 5) Fill pixels that were actually fitted
+    # ------------------------------------------------------------------
+    for key, ix, iy in indices:
+        pix = whole_map_df[key].get(model_key, None)
+        if pix is None or not pix.get("success", False):
+            continue
+
+        stats = pix["result"]["posteriorStats"]
+
+        try:
+            mass_stats = stats["Mass"][0]
+            temp_stats = stats["Temperature"][0]
+
+            # Central values
+            mass_val = float(mass_stats[stat_key])
+            temp_val = temp_stats[stat_key].to(u.K).value
+
+            # Asymmetric uncertainties [lower, upper]
+            mass_err_lo = float(mass_stats["uncertainty"][0])
+            mass_err_hi = float(mass_stats["uncertainty"][1])
+
+            temp_err_lo = temp_stats["uncertainty"][0].to(u.K).value
+            temp_err_hi = temp_stats["uncertainty"][1].to(u.K).value
+        except Exception as e:
+            raise RuntimeError(f"Missing data for pixel key {key}: {e}")
+
+        # Convert FIT indices to array indices
+        j = iy - y_offset  # row
+        i = ix - x_offset  # column
+
+        if not (0 <= i < target_nx and 0 <= j < target_ny):
+            raise RuntimeError(
+                f"Pixel index out of bounds: "
+                f"ix={ix}, iy={iy} -> i={i}, j={j}. "
+                f"(target_nx={target_nx}, target_ny={target_ny}, "
+                f"offset=({x_offset},{y_offset}))"
+            )
+
+        mass_map[j, i] = mass_val
+        mass_err_lo_map[j, i] = mass_err_lo
+        mass_err_hi_map[j, i] = mass_err_hi
+
+        temp_map[j, i] = temp_val
+        temp_err_lo_map[j, i] = temp_err_lo
+        temp_err_hi_map[j, i] = temp_err_hi
+
+    if verbose:
+        print("Mass map shape:", mass_map.shape)
+        print("Temp map shape:", temp_map.shape)
+        print(
+            f"Mass range: {np.nanmin(mass_map):.2e} to "
+            f"{np.nanmax(mass_map):.2e} (unit of your Mass parameter)"
+        )
+        print(
+            f"Temp range: {np.nanmin(temp_map):.2f} K to "
+            f"{np.nanmax(temp_map):.2f} K"
+        )
+
+    # ------------------------------------------------------------------
+    # 6) Optional quick-look plot
+    # ------------------------------------------------------------------
+    if quick_plot:
+        plt.figure(figsize=(10, 4))
+
+        plt.subplot(1, 2, 1)
+        plt.title("Mass Map")
+        vmin = np.nanpercentile(mass_map, 5)
+        vmax = np.nanpercentile(mass_map, 95)
+        plt.imshow(
+            mass_map,
+            origin="lower",
+            cmap="viridis",
+            vmin=vmin,
+            vmax=vmax,
+        )
+        plt.colorbar(label="Mass")
+
+        plt.subplot(1, 2, 2)
+        plt.title("Temperature Map")
+        vmin = np.nanpercentile(temp_map, 5)
+        vmax = np.nanpercentile(temp_map, 95)
+        plt.imshow(
+            temp_map,
+            origin="lower",
+            cmap="inferno",
+            vmin=vmin,
+            vmax=vmax,
+        )
+        plt.colorbar(label="Temperature (K)")
+
+        plt.tight_layout()
+        plt.show()
+
+    return (
+        mass_map,
+        mass_err_lo_map,
+        mass_err_hi_map,
+        temp_map,
+        temp_err_lo_map,
+        temp_err_hi_map,
+    )
